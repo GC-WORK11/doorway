@@ -59,6 +59,7 @@ body {
   background: var(--dw-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.01em;
 }
 
 button,
@@ -82,7 +83,7 @@ h2,
 h3,
 h4 {
   font-weight: 500;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
 }
 .sr-only {
   position: absolute;
