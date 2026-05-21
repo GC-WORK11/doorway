@@ -118,10 +118,10 @@ function SidebarThreadGroup({
         {threads.map((thread) => (
           <motion.button
             layout
-            initial={{ opacity: 0, x: -10 }}
+            initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.2 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 32 }}
             className="thread-row"
             type="button"
             key={thread.id}

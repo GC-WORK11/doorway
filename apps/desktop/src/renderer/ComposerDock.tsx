@@ -58,9 +58,9 @@ export function ComposerDock() {
     <motion.section
       className="composer-dock"
       aria-label="Composer"
-      initial={{ y: 20, opacity: 0 }}
+      initial={{ y: 16, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
+      transition={{ type: 'spring', stiffness: 380, damping: 32 }}
     >
       <div className="composer-primary-row">
         <button
@@ -200,10 +200,10 @@ export function ComposerDock() {
           <motion.div
             className="mention-menu"
             aria-label="Mention suggestions"
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            initial={{ opacity: 0, y: 8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            exit={{ opacity: 0, y: 8, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 34 }}
           >
             {activeMentionTargets.map((target: any) => (
               <button type="button" key={target.id} onClick={() => onApplyComposerMention(target)}>

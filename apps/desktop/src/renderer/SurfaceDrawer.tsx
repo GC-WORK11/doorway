@@ -162,10 +162,10 @@ export function SurfaceDrawer() {
 
   return (
     <motion.aside
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18, ease: 'easeOut' }}
+      initial={{ opacity: 0, scale: 0.96, y: 8 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.96, y: 8 }}
+      transition={{ type: 'spring', stiffness: 350, damping: 30 }}
       className={`surface-drawer surface-drawer--${activeSurface}`}
       aria-label={activeSurfaceLabel}
     >

@@ -536,8 +536,8 @@ export function TerminalMuxPanel() {
                   layout
                   initial={{ opacity: 0, x: -20, width: 0 }}
                   animate={{ opacity: 1, x: 0, width: 'auto' }}
-                  exit={{ opacity: 0, scale: 0.8, width: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  exit={{ opacity: 0, scale: 0.85, width: 0 }}
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                   key={session.id}
                   className={`terminal-tab ${isActive ? 'terminal-tab--active' : ''}`}
                   onClick={() => onSelectSession(session.id)}
