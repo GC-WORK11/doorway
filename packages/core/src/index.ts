@@ -26,3 +26,5 @@ export * from './agent-mesh.js';
 export * from './event-bus.js';
 export * from './id-gen.js';
 export * from './errors.js';
+export * from './automation-service.js';
+export * from './plugin-manifest.js';
