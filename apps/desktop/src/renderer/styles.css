@@ -140,8 +140,8 @@ h4 {
   border-radius: 8px;
   color: var(--dw-text-soft);
   transition:
-    color 120ms ease,
-    background 120ms ease;
+    color 200ms ease,
+    background 200ms ease;
 }
 
 .rail-button:hover,
@@ -454,7 +454,7 @@ h4 {
   padding: 8px 12px;
   border-radius: 6px;
   text-align: left;
-  transition: background 100ms ease;
+  transition: background 200ms ease;
 }
 
 .thread-row:hover {
@@ -1004,7 +1004,7 @@ h4 {
   font-size: 13.5px;
   font-weight: 500;
   white-space: nowrap;
-  transition: all 150ms ease;
+  transition: all 200ms ease;
 }
 
 .thread-starter-panel__form button:disabled {
@@ -1328,7 +1328,7 @@ h4 {
   place-items: center;
   border-radius: 8px;
   color: var(--dw-text-faint);
-  transition: color 120ms ease;
+  transition: color 200ms ease;
 }
 
 .composer-command-button svg {
@@ -1377,7 +1377,7 @@ h4 {
   border-radius: 8px;
   background: var(--dw-text);
   color: var(--dw-bg);
-  transition: opacity 120ms ease;
+  transition: opacity 200ms ease;
 }
 
 .send-button svg {
@@ -1637,7 +1637,7 @@ h4 {
   padding: 7px 10px;
   border-radius: 8px;
   font-size: 12px;
-  transition: background 80ms ease;
+  transition: background 200ms ease;
 }
 
 .mention-menu button:hover {
@@ -1785,7 +1785,7 @@ h4 {
   font-weight: 500;
   color: var(--dw-text-soft);
   cursor: pointer;
-  transition: all 100ms ease;
+  transition: all 200ms ease;
 }
 
 .terminal-tab:hover {
@@ -2067,7 +2067,7 @@ h4 {
   padding: 8px 12px;
   border-radius: 8px;
   font-size: 13px;
-  transition: background 80ms ease;
+  transition: background 200ms ease;
 }
 
 .command-palette-results button:hover {
