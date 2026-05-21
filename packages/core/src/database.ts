@@ -652,6 +652,45 @@ function runMigrations(db: Database.Database): void {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_permission_receipts_thread ON permission_receipts(thread_id, timestamp)'
   );
+
+  // Automation tables (added after migrations to ensure correct order)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS automations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT,
+      cron_expression TEXT NOT NULL,
+      command TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_run_at TEXT,
+      next_run_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS automation_runs (
+      id TEXT PRIMARY KEY,
+      automation_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      exit_code INTEGER,
+      output TEXT,
+      error TEXT,
+      FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Automation indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_automations_project ON automations(project_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations(enabled)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_automations_next_run ON automations(next_run_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_automation_runs_status ON automation_runs(status)');
 }
 
 function ensureColumn(
