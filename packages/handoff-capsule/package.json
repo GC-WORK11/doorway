@@ -1,0 +1,23 @@
+{
+  "name": "@doorway/handoff-capsule",
+  "version": "0.1.0",
+  "description": "Handoff formats between providers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./*": "./dist/*.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --outDir dist --declaration",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@doorway/protocol": "workspace:*"
+  }
+}

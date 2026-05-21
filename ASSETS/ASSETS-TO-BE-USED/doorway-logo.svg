@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Doorway Logo</title>
+  <desc id="desc">Minimal monoline doorway arch logo for the Doorway developer tool.</desc>
+  <rect width="1024" height="1024" fill="none"/>
+  <path d="M282 764V426C282 301.184 383.184 200 508 200C632.816 200 734 301.184 734 426V764"
+        stroke="#111111" stroke-width="78" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M406 764V438C406 381.667 451.667 336 508 336C564.333 336 610 381.667 610 438V764"
+        stroke="#111111" stroke-width="78" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

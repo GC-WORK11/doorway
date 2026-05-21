@@ -1,0 +1,11 @@
+dist/
+node_modules/
+.turbo/
+coverage/
+our-competetors-and-resources/
+OTHER-CLI-TOOL-AND-HARNESSES/
+unpacked_cu_prd/
+unpacked_prd/
+brutal_audit.md
+Doorway_Terminal_Harness_Orchestrator_Worktree_PRD_2026-05-18.md
+Doorway_Fresh_Start_Master_Context_and_Execution_Prompt_2026-05-19.md

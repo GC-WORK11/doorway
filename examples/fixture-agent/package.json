@@ -1,0 +1,18 @@
+{
+  "name": "@doorway/fixture-agent",
+  "version": "0.1.0",
+  "description": "Deterministic fixture agent for testing Doorway terminal runtime",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "fixture-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "typescript": "^5.4.0"
+  }
+}

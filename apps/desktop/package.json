@@ -1,0 +1,47 @@
+{
+  "name": "@doorway/desktop",
+  "version": "0.1.0",
+  "description": "Doorway Desktop - Local-first agent IDE",
+  "type": "module",
+  "main": "dist/main/index.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/build-main.mjs",
+    "build:main": "node scripts/build-main.mjs",
+    "start": "electron dist/main/index.cjs",
+    "smoke:renderer": "node scripts/smoke-renderer.mjs",
+    "smoke:renderer:populated": "DOORWAY_RENDERER_STATE=populated DOORWAY_RENDERER_SCREENSHOT=/tmp/doorway-renderer-populated-smoke.png node scripts/smoke-renderer.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root . src/**/*.test.ts src/**/*.test.tsx",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@doorway/adapters": "workspace:^",
+    "@doorway/core": "workspace:*",
+    "@doorway/git-engine": "workspace:^",
+    "@doorway/orchestrator": "workspace:^",
+    "@doorway/protocol": "workspace:*",
+    "@doorway/review-merge": "workspace:^",
+    "@doorway/terminal-runtime": "workspace:^",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "electron": "^31.1.0",
+    "framer-motion": "^12.39.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-resizable-panels": "^4.11.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.5.0",
+    "esbuild": "^0.21.0",
+    "playwright-core": "^1.60.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1",
+    "vitest": "^1.6.0"
+  }
+}

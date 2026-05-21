@@ -1,0 +1,23 @@
+{
+  "name": "@doorway/adapters",
+  "version": "0.1.0",
+  "description": "Doorway Agent Adapters",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./*": "./dist/*.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --outDir dist --declaration",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@doorway/protocol": "workspace:*"
+  }
+}

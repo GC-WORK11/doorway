@@ -1,0 +1,194 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+ * Doorway Design Tokens — Premium Dark IDE
+ *
+ * Inspired by T3 Code, Cursor 3, Codex Desktop.
+ * Warm neutral palette, DM Sans typography, oklch accent.
+ */
+
+  /* ============================================================================
+   Core Design Tokens
+   ============================================================================ */
+
+  :root {
+    /* --- Neutral palette (warm dark, not cold blue) --- */
+    --dw-bg: #0a0a0b;
+    --dw-bg-elevated: #111113;
+    --dw-bg-soft: #18181b;
+    --dw-bg-glass: rgba(10, 10, 11, 0.82);
+    --dw-surface: #111113;
+    --dw-surface-muted: #1c1c1f;
+    --dw-surface-hover: rgba(255, 255, 255, 0.04);
+    --dw-surface-active: rgba(255, 255, 255, 0.07);
+
+    /* --- Borders (barely visible, warm) --- */
+    --dw-border: rgba(255, 255, 255, 0.06);
+    --dw-border-strong: rgba(255, 255, 255, 0.1);
+
+    /* --- Text hierarchy --- */
+    --dw-text: #e4e4e7;
+    --dw-text-muted: #a1a1aa;
+    --dw-text-soft: #71717a;
+    --dw-text-faint: #3f3f46;
+
+    /* --- Accent (soft violet, oklch-inspired) --- */
+    --dw-accent: #818cf8;
+    --dw-accent-soft: rgba(129, 140, 248, 0.1);
+    --dw-accent-border: rgba(129, 140, 248, 0.2);
+
+    /* --- Semantic status --- */
+    --dw-success: #34d399;
+    --dw-success-soft: rgba(52, 211, 153, 0.1);
+    --dw-warning: #fbbf24;
+    --dw-warning-soft: rgba(251, 191, 36, 0.1);
+    --dw-danger: #f87171;
+    --dw-danger-soft: rgba(248, 113, 113, 0.1);
+    --dw-live: #34d399;
+
+    /* --- Layout geometry (test-required) --- */
+    --dw-rail-width: 56px;
+    --dw-rail-gap: 8px;
+    --dw-sidebar-width: 284px;
+    --dw-composer-height: 132px;
+
+    /* --- Typography --- */
+    --font-sans:
+      'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace;
+
+    /* --- Radius --- */
+    --radius: 0.625rem;
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --radius-2xl: calc(var(--radius) + 8px);
+    --radius-panel: 14px;
+    --radius-card: 16px;
+    --radius-chip: 10px;
+    --radius-button-round: 999px;
+
+    /* --- Spacing --- */
+    --spacing-sidebar: 16px;
+    --spacing-panel-gap: 8px;
+    --spacing-landing-gap: 24px;
+    --spacing-composer: 24px;
+
+    /* --- Layout --- */
+    --sidebar-width-landing: 280px;
+    --sidebar-width-workspace: 260px;
+    --sidebar-width-collapsed: 64px;
+    --thread-panel-min: 360px;
+    --thread-panel-max: 470px;
+    --editor-min: 420px;
+    --surface-panel-min: 360px;
+    --surface-panel-max: 520px;
+
+    /* --- Shadows (warm, subtle) --- */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Optional light theme tokens */
+  [data-theme='light'] {
+    --dw-bg: #fafafa;
+    --dw-bg-elevated: #ffffff;
+    --dw-bg-soft: #f4f4f5;
+    --dw-bg-glass: rgba(255, 255, 255, 0.82);
+    --dw-surface: #ffffff;
+    --dw-surface-muted: #e4e4e7;
+    --dw-surface-hover: rgba(0, 0, 0, 0.03);
+    --dw-surface-active: rgba(0, 0, 0, 0.06);
+    --dw-border: rgba(0, 0, 0, 0.08);
+    --dw-border-strong: rgba(0, 0, 0, 0.14);
+    --dw-text: #18181b;
+    --dw-text-muted: #52525b;
+    --dw-text-soft: #71717a;
+    --dw-text-faint: #a1a1aa;
+    --dw-accent: #6366f1;
+    --dw-accent-soft: rgba(99, 102, 241, 0.1);
+    --dw-accent-border: rgba(99, 102, 241, 0.2);
+    --dw-success: #10b981;
+    --dw-success-soft: rgba(16, 185, 129, 0.1);
+    --dw-warning: #f59e0b;
+    --dw-warning-soft: rgba(245, 158, 11, 0.1);
+    --dw-danger: #ef4444;
+    --dw-danger-soft: rgba(239, 68, 68, 0.1);
+    --dw-live: #10b981;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+  }
+
+  /* ============================================================================
+   Scrollbar — thin, near-invisible (6px like T3 Code)
+   ============================================================================ */
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* ============================================================================
+   Selection & Focus
+   ============================================================================ */
+
+  ::selection {
+    background: var(--dw-accent);
+    color: white;
+  }
+
+  :focus-visible {
+    outline: none;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline: none;
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  /* ============================================================================
+   Noise Texture — subtle depth (inspired by T3 Code)
+   ============================================================================ */
+
+  /* Noise texture removed — cleaner, lighter feel like Cursor/Codex */
+
+  /* ============================================================================
+   Reduced Motion
+   ============================================================================ */
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

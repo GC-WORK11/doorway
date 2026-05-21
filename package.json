@@ -1,0 +1,40 @@
+{
+  "name": "doorway",
+  "version": "0.1.0",
+  "description": "Local-first desktop cockpit for visible terminal agents, git worktrees, and review/merge workflows",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "typecheck": "turbo typecheck",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "dead": "knip",
+    "deps": "depcheck --ignore-dirs=our-competetors-and-resources,OTHER-CLI-TOOL-AND-HARNESSES,unpacked_cu_prd,unpacked_prd",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "build": "turbo build",
+    "gate": "pnpm typecheck && pnpm lint && pnpm test && pnpm dead && pnpm deps && pnpm format && pnpm build",
+    "dev": "turbo dev",
+    "sqlite:rebuild:electron": "node scripts/rebuild-sqlite.mjs electron",
+    "sqlite:rebuild:node": "node scripts/rebuild-sqlite.mjs node",
+    "desktop:view": "node scripts/desktop-view.mjs",
+    "clean": "turbo clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^20.12.0",
+    "depcheck": "^1.4.0",
+    "eslint": "^9.0.0",
+    "knip": "^5.0.0",
+    "prettier": "^3.2.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.59.3",
+    "vitest": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}
