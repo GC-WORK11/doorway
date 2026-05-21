@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import type {
   AgentLaunchMode,
   AgentPermissionProfile,
@@ -118,14 +119,35 @@ export function ThreadCanvas() {
               submitThread={submitThread}
             />
           ) : messages.length > 0 ? (
-            messages.map((message) => (
-              <article className={messageCapsuleClassName(message.role)} key={message.id}>
-                <div className="message-meta">{message.role === 'user' ? 'You' : 'Doorway'}</div>
-                <p>
-                  <MentionedText text={message.content} />
-                </p>
-              </article>
-            ))
+            <motion.div
+              className="message-list__stagger"
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: {
+                  opacity: 1,
+                  transition: { staggerChildren: 0.05 },
+                },
+              }}
+            >
+              {messages.map((message) => (
+                <motion.article
+                  className={messageCapsuleClassName(message.role)}
+                  key={message.id}
+                  variants={{
+                    hidden: { opacity: 0, y: 8 },
+                    visible: { opacity: 1, y: 0 },
+                  }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                >
+                  <div className="message-meta">{message.role === 'user' ? 'You' : 'Doorway'}</div>
+                  <p>
+                    <MentionedText text={message.content} />
+                  </p>
+                </motion.article>
+              ))}
+            </motion.div>
           ) : (
             <EmptyState
               title="No thread messages"

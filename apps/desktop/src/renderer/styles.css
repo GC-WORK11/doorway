@@ -446,6 +446,11 @@ h4 {
   color: var(--dw-text-faint);
 }
 
+.sidebar-thread-group__list {
+  display: flex;
+  flex-direction: column;
+}
+
 .thread-row {
   display: flex;
   flex-direction: column;
@@ -531,6 +536,13 @@ h4 {
   min-width: 0;
   overflow: hidden;
   background: var(--dw-bg);
+}
+
+.message-list__stagger {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 }
 
 .thread-content {

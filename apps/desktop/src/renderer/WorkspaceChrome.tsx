@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import doorwayLogoUrl from './assets/logos/doorway-logo.svg?url';
 import type { ProjectMemorySource, ProjectProjection, ThreadProjection } from '@doorway/protocol';
 import { EmptyState, ProjectInstructionStatus, SidebarProjectContext } from './shared-ui';
@@ -114,13 +114,27 @@ function SidebarThreadGroup({
         <span>{label}</span>
         <small>{threads.length}</small>
       </div>
-      <AnimatePresence>
+      <motion.div
+        className="sidebar-thread-group__list"
+        initial="hidden"
+        animate="visible"
+        exit="hidden"
+        variants={{
+          hidden: { opacity: 0 },
+          visible: {
+            opacity: 1,
+            transition: { staggerChildren: 0.05 },
+          },
+        }}
+      >
         {threads.map((thread) => (
           <motion.button
             layout
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
+            variants={{
+              hidden: { opacity: 0, x: -8 },
+              visible: { opacity: 1, x: 0 },
+              exit: { opacity: 0, scale: 0.95 },
+            }}
             transition={{ type: 'spring', stiffness: 400, damping: 32 }}
             className="thread-row"
             type="button"
@@ -136,7 +150,7 @@ function SidebarThreadGroup({
             </small>
           </motion.button>
         ))}
-      </AnimatePresence>
+      </motion.div>
     </section>
   );
 }
