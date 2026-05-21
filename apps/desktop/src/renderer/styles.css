@@ -499,6 +499,14 @@ h4 {
   text-align: center;
 }
 
+.empty-state__icon {
+  width: 32px;
+  height: 32px;
+  color: var(--dw-text-faint);
+  opacity: 0.5;
+  margin-bottom: 4px;
+}
+
 .empty-state__title {
   font-size: 13px;
   font-weight: 400;
@@ -854,20 +862,41 @@ h4 {
   opacity: 0.7;
 }
 
+.first-run-panel__icon {
+  width: 48px;
+  height: 48px;
+  color: var(--dw-text-faint);
+  opacity: 0.4;
+  margin-bottom: 8px;
+}
+
+.first-run-panel__checks {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.first-run-panel__checks span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--dw-text-faint);
+  opacity: 0.5;
+}
+
+.first-run-panel__checks svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+}
+
 .first-run-panel__intro p {
   font-size: 12.5px;
   color: var(--dw-text-faint);
   opacity: 0.5;
   line-height: 1.65;
   max-width: 340px;
-}
-
-.first-run-panel__checks {
-  display: none;
-}
-
-.first-run-panel__checks span {
-  font-size: 11px;
 }
 
 .first-run-panel__form {
@@ -967,12 +996,34 @@ h4 {
   opacity: 0.5;
 }
 
+.thread-starter-panel__icon {
+  width: 48px;
+  height: 48px;
+  color: var(--dw-text-faint);
+  opacity: 0.35;
+  margin-bottom: 8px;
+}
+
 .thread-starter-panel__meta {
-  display: none;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 .thread-starter-panel__meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
+  color: var(--dw-text-faint);
+  opacity: 0.5;
+}
+
+.thread-starter-panel__meta svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
 }
 
 .thread-starter-panel__form {
