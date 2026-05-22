@@ -225,6 +225,23 @@ try {
         permissionDecisions: [],
       };
       let permissionReceipts = [];
+      let compactCheckpoints = [];
+      let automations = [
+        {
+          id: 'automation_smoke',
+          projectId: project.id,
+          name: 'Morning smoke review',
+          description: 'Projected scheduled review state.',
+          cronExpression: '0 9 * * *',
+          command: 'pnpm smoke:review',
+          enabled: true,
+          lastRunAt: null,
+          nextRunAt: null,
+          createdAt: '2026-05-18T01:00:00.000Z',
+          updatedAt: '2026-05-18T01:00:00.000Z',
+        },
+      ];
+      let automationRuns = [];
       Object.defineProperty(window, '__doorwaySmoke', {
         configurable: true,
         value: smokeState,
@@ -310,7 +327,65 @@ try {
           { sourceFile: 'AGENTS.md', category: 'instruction', contentLength: 1200 },
           { sourceFile: 'DOORWAY.md', category: 'instruction', contentLength: 900 },
         ],
-        listProjectPlugins: async () => [],
+        listProjectPlugins: async () => [
+          {
+            id: 'doorway.smoke-review',
+            name: 'Smoke review plugin',
+            version: '1.0.0',
+            manifestPath: '/home/govinda/Doorway/.doorway/plugins/smoke-review/doorway.plugin.json',
+            status: 'ready',
+            capabilities: ['slash_command', 'context_provider'],
+            filesystemRead: ['docs/**'],
+            filesystemWrite: [],
+            networkHosts: ['api.example.test'],
+            entryCommand: 'pnpm smoke:review',
+          },
+        ],
+        listAutomations: async () => automations,
+        createAutomation: async (req) => {
+          const automation = {
+            id: 'automation_created',
+            projectId: req.projectId,
+            name: req.name,
+            description: req.description ?? null,
+            cronExpression: req.cronExpression,
+            command: req.command,
+            enabled: req.enabled !== false,
+            lastRunAt: null,
+            nextRunAt: null,
+            createdAt: '2026-05-18T02:00:00.000Z',
+            updatedAt: '2026-05-18T02:00:00.000Z',
+          };
+          automations = [automation, ...automations];
+          return automation;
+        },
+        updateAutomation: async (req) => {
+          automations = automations.map((automation) =>
+            automation.id === req.id ? { ...automation, ...req } : automation
+          );
+          return automations.find((automation) => automation.id === req.id);
+        },
+        deleteAutomation: async (id) => {
+          automations = automations.filter((automation) => automation.id !== id);
+          return { deleted: true };
+        },
+        getAutomationRuns: async () => automationRuns,
+        runAutomationNow: async (id) => {
+          const run = {
+            id: 'automation_run_smoke',
+            automationId: id,
+            threadId: thread.id,
+            terminalSessionId: 'session_seeded',
+            status: 'completed',
+            startedAt: '2026-05-18T02:02:00.000Z',
+            completedAt: '2026-05-18T02:02:01.000Z',
+            exitCode: 0,
+            output: 'smoke review ready',
+            error: null,
+          };
+          automationRuns = [run];
+          return run;
+        },
         listProviderModels: async () => [],
         listToolCapabilities: async () => [
           {
@@ -383,7 +458,26 @@ try {
           storedPatternCount: 0,
           generatedAt: new Date('2026-05-18T02:00:00.000Z'),
         }),
-        getThreadCompactCheckpoints: async () => [],
+        getThreadCompactCheckpoints: async () => compactCheckpoints,
+        createCompactCheckpoint: async () => {
+          const checkpoint = {
+            id: 'compact_smoke',
+            threadId: thread.id,
+            originalGoal: 'Verify populated smoke orchestration lane',
+            currentStatus: 'running',
+            filesChanged: ['apps/desktop/src/renderer/App.tsx'],
+            commandsRun: ['pnpm test'],
+            tests: ['Unit tests · pass'],
+            errors: [],
+            importantLines: ['tests passed'],
+            nextAction: 'Continue from the latest terminal state without opening a new lane.',
+            nextPrompt: 'Continue from populated compact checkpoint evidence.',
+            createdAt: new Date('2026-05-18T01:44:00.000Z'),
+            evidence: [],
+          };
+          compactCheckpoints = [...compactCheckpoints, checkpoint];
+          return checkpoint;
+        },
         exportThreadReplay: async () => ({
           path: '/tmp/doorway-replay.jsonl',
           eventCount: 0,
@@ -614,6 +708,39 @@ try {
       'live permission denial did not send terminal input'
     );
     await permissionDialog.waitFor({ state: 'hidden', timeout: 5000 });
+    await page.getByRole('button', { name: 'Open command menu' }).click();
+    await page.getByRole('button', { name: /Compact checkpoint/ }).click();
+    await page
+      .getByLabel('Latest compact checkpoint')
+      .getByText('Continue from the latest terminal state without opening a new lane.')
+      .waitFor({ state: 'visible', timeout: 5000 });
+    const compactPrompt = await page.getByRole('textbox', { name: 'Prompt' }).inputValue();
+    assert(
+      compactPrompt === 'Continue from populated compact checkpoint evidence.',
+      'compact continuation prompt did not populate the composer'
+    );
+    await page.getByRole('button', { name: 'Open command menu' }).click();
+    await page.getByRole('button', { name: /Plugins surface/ }).click();
+    const pluginDrawer = page.getByRole('complementary', { name: 'Plugins' });
+    await pluginDrawer.waitFor({ state: 'visible', timeout: 5000 });
+    await pluginDrawer
+      .getByText('Smoke review plugin')
+      .waitFor({ state: 'visible', timeout: 5000 });
+    await pluginDrawer.getByText('pnpm smoke:review').waitFor({ state: 'visible', timeout: 5000 });
+    await assertDrawerLayout(page, pluginDrawer, 'plugins');
+    await pluginDrawer.getByRole('button', { name: 'Close surface' }).click();
+    await page.getByRole('button', { name: 'Open command menu' }).click();
+    await page.getByRole('button', { name: /Automations surface/ }).click();
+    const automationDrawer = page.getByRole('complementary', { name: 'Automations' });
+    await automationDrawer.waitFor({ state: 'visible', timeout: 5000 });
+    await automationDrawer
+      .getByText('Morning smoke review')
+      .waitFor({ state: 'visible', timeout: 5000 });
+    await automationDrawer.getByRole('button', { name: 'Run Now' }).click();
+    await automationDrawer.getByRole('button', { name: 'History' }).click();
+    await automationDrawer.getByText('Exit: 0').waitFor({ state: 'visible', timeout: 5000 });
+    await assertDrawerLayout(page, automationDrawer, 'automations');
+    await automationDrawer.getByRole('button', { name: 'Close surface' }).click();
     await page.getByRole('button', { name: 'Evidence' }).click();
     const evidenceDrawer = page.getByRole('complementary', { name: 'Evidence' });
     await evidenceDrawer.waitFor({ state: 'visible', timeout: 5000 });

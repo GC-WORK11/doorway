@@ -619,6 +619,7 @@ export function listTerminalProjections(
         terminal_sessions.exit_summary,
         terminal_sessions.exit_recommendation,
         terminal_sessions.exit_signal_number,
+        COALESCE(terminal_sessions.started_at, terminal_sessions.created_at) AS created_at,
         terminal_chunks.text AS last_output
       FROM terminal_sessions
       LEFT JOIN terminal_chunks
@@ -648,6 +649,7 @@ export function listTerminalProjections(
       ...(row.pid !== null ? { pid: row.pid } : {}),
       ...(row.exit_code !== null ? { exitCode: row.exit_code } : {}),
       ...(row.signal ? { signal: row.signal } : {}),
+      createdAt: new Date(row.created_at as string),
       ...(row.exit_kind && row.exit_label && row.exit_summary && row.exit_recommendation
         ? {
             exitClassification: {
@@ -737,5 +739,6 @@ interface TerminalProjectionRow {
   readonly exit_summary: string | null;
   readonly exit_recommendation: string | null;
   readonly exit_signal_number: number | null;
+  readonly created_at: string;
   readonly last_output: string | null;
 }

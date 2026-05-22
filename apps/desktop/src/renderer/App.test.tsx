@@ -1138,8 +1138,38 @@ describe('App', () => {
     expect(html).toContain('Codex Reviewer -&gt; Claude Implementer');
   });
 
+  it('renders compact checkpoints from persisted thread projections', async () => {
+    const { CompactCheckpointCapsule } = await import('./App');
+    const html = renderToStaticMarkup(
+      React.createElement(CompactCheckpointCapsule, {
+        checkpoints: [
+          {
+            id: 'compact_1',
+            threadId: 'thread_compact' as ThreadId,
+            originalGoal: 'Finish the Doorway renderer overhaul.',
+            currentStatus: 'waiting_for_input',
+            filesChanged: ['apps/desktop/src/renderer/App.tsx'],
+            commandsRun: ['pnpm test'],
+            tests: ['renderer smoke pass'],
+            errors: [],
+            importantLines: ['tests passed'],
+            nextAction: 'Answer the active terminal prompt, then continue the run.',
+            nextPrompt: 'Continue this Doorway run from the compact checkpoint.',
+            createdAt: new Date('2026-05-18T02:00:00.000Z'),
+            evidence: [],
+          },
+        ],
+      })
+    );
+
+    expect(html).toContain('aria-label="Latest compact checkpoint"');
+    expect(html).toContain('Finish the Doorway renderer overhaul.');
+    expect(html).toContain('waiting for input');
+    expect(html).toContain('1 commands');
+    expect(html).toContain('Answer the active terminal prompt');
+  });
+
   it('renders newest terminal transcript chunks from persisted terminal output only', async () => {
-    const { TerminalTranscriptCapsule, latestTerminalTranscriptChunks } = await import('./App');
     const { TerminalSurface, terminalSurfaceStatusLabel, terminalSurfaceText } =
       await import('./TerminalSurface');
     const sessionId = 'term_1' as TerminalSessionId;
@@ -1170,23 +1200,6 @@ describe('App', () => {
         isStderr: true,
       },
     ] satisfies TranscriptChunk[];
-
-    expect(latestTerminalTranscriptChunks(chunks, 2).map((chunk) => chunk.sequence)).toEqual([
-      3, 2,
-    ]);
-
-    const emptyHtml = renderToStaticMarkup(
-      React.createElement(TerminalTranscriptCapsule, { terminalTranscript: [] })
-    );
-    const html = renderToStaticMarkup(
-      React.createElement(TerminalTranscriptCapsule, { terminalTranscript: chunks })
-    );
-
-    expect(emptyHtml).toBe('');
-    expect(html).toContain('aria-label="Terminal transcript preview"');
-    expect(html.indexOf('tests passed')).toBeLessThan(html.indexOf('warning'));
-    expect(html).toContain('data-stream="stderr"');
-    expect(html).toContain('stdout');
 
     const terminalHtml = renderToStaticMarkup(
       React.createElement(TerminalSurface, {
@@ -1302,6 +1315,7 @@ describe('App', () => {
         workingDirectory: '/repo/.doorway-workspaces/task-review/backend',
         command: 'pnpm test',
         lastOutput: 'tests passed\n',
+        createdAt: new Date('2026-05-18T01:00:01.000Z'),
       },
       {
         id: approvalSessionId,
@@ -1310,6 +1324,7 @@ describe('App', () => {
         workingDirectory: '/repo/.doorway-workspaces/task-review/backend',
         command: 'claude code',
         lastOutput: 'awaiting worker signal\n',
+        createdAt: new Date('2026-05-18T01:00:02.000Z'),
       },
     ] satisfies TerminalProjection[];
     const terminalInputs = [
@@ -1599,7 +1614,8 @@ describe('App', () => {
   });
 
   it('projects unresolved permission events into a live decision request', async () => {
-    const { LivePermissionModal, livePermissionRequest } = await import('./App');
+    const { livePermissionRequest } = await import('./App');
+    const { LivePermissionModal } = await import('./modals');
     const approvalRequested = {
       id: 'evt_approval_requested',
       threadId: 'thread_1',
@@ -3139,12 +3155,18 @@ describe('App', () => {
 
     expect(slashCommands).toContain('/merge');
     expect(slashCommands).toContain('/tools');
+    expect(slashCommands).toContain('/plugins');
+    expect(slashCommands).toContain('/automations');
+    expect(slashCommands).toContain('/compact');
     expect(surfaceForSlashCommand('/merge')).toBe('worktrees');
     expect(surfaceForSlashCommand('/review')).toBe('worktrees');
     expect(surfaceForSlashCommand('/browser')).toBe('browser');
     expect(surfaceForSlashCommand('/handoff')).toBe('evidence');
     expect(surfaceForSlashCommand('/tools')).toBe('tools');
+    expect(surfaceForSlashCommand('/plugins')).toBe('plugins');
+    expect(surfaceForSlashCommand('/automations')).toBe('automations');
     expect(surfaceForSlashCommand('/build')).toBeNull();
+    expect(surfaceForSlashCommand('/compact')).toBeNull();
   });
 
   it('renders tool capability permissions from the IPC projection', async () => {
@@ -3475,6 +3497,8 @@ describe('App', () => {
       evidenceRecordCount: 0,
       worktreeCount: 0,
       toolCount: 0,
+      pluginCount: 0,
+      automationCount: 0,
     };
 
     expect(
@@ -3497,5 +3521,11 @@ describe('App', () => {
       '1 worktree'
     );
     expect(surfaceDrawerStatusLabel('tools', { ...baseStatus, toolCount: 4 })).toBe('4 tools');
+    expect(surfaceDrawerStatusLabel('plugins', { ...baseStatus, pluginCount: 2 })).toBe(
+      '2 manifests'
+    );
+    expect(surfaceDrawerStatusLabel('automations', { ...baseStatus, automationCount: 3 })).toBe(
+      '3 automations'
+    );
   });
 });

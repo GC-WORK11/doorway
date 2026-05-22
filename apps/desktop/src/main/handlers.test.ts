@@ -13,6 +13,7 @@ import {
 import {
   assertCleanArchiveSource,
   assertCleanForkSource,
+  assertAutomationMutationRequest,
   assertReadyForIntegrationMerge,
   assertReviewMergeToolEnabled,
   browserEvidenceBundleJson,
@@ -92,6 +93,48 @@ describe('buildWorktreeMergeApproval', () => {
         path: '/repo',
       })
     ).toThrow('Cannot approve non-Doorway branch: feature/user-branch');
+  });
+});
+
+describe('assertAutomationMutationRequest', () => {
+  it('requires project-scoped create requests with valid commands and schedules', () => {
+    expect(() =>
+      assertAutomationMutationRequest(
+        {
+          projectId: 'project_1',
+          name: 'Morning review',
+          command: 'pnpm test',
+          cronExpression: '0 9 * * *',
+        },
+        'create'
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertAutomationMutationRequest(
+        { name: 'Morning review', command: 'pnpm test', cronExpression: '0 9 * * *' },
+        'create'
+      )
+    ).toThrow('Automation creation requires a project id.');
+    expect(() =>
+      assertAutomationMutationRequest(
+        {
+          projectId: 'project_1',
+          name: 'Morning review',
+          command: 'pnpm test',
+          cronExpression: 'bad',
+        },
+        'create'
+      )
+    ).toThrow('Invalid automation cron expression: bad');
+  });
+
+  it('requires ids for updates and validates edited schedules', () => {
+    expect(() =>
+      assertAutomationMutationRequest({ id: 'automation_1', enabled: false }, 'update')
+    ).not.toThrow();
+    expect(() => assertAutomationMutationRequest({ enabled: false }, 'update')).toThrow(
+      'Automation update requires an id.'
+    );
   });
 });
 

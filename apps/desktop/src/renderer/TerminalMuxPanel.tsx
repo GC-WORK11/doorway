@@ -9,6 +9,9 @@ import type {
 } from '@doorway/protocol';
 import { TerminalSurface } from './TerminalSurface';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ProcessTreePanel } from './ProcessTreePanel';
+import { FileDeltaPanel } from './FileDeltaPanel';
+import { ExitTaxonomyPanel } from './ExitTaxonomyPanel';
 
 type TerminalAttention =
   | 'running'
@@ -521,8 +524,6 @@ export function TerminalMuxPanel() {
   const canControlActiveTerminal =
     Boolean(activeTerminalSessionId) && activeSummary?.status === 'running';
   const inputHistoryRows = terminalInputHistoryRows(terminalInputs);
-  const processEvidenceRows = terminalProcessEvidenceRows(activeTerminalSession);
-  const fileEvidenceRows = terminalFileEvidenceRows(activeTerminalSession);
 
   return (
     <section className="terminal-mux" aria-label="Terminal mux">
@@ -653,57 +654,10 @@ export function TerminalMuxPanel() {
           )}
         </section>
 
-        <section className="terminal-evidence-strip" aria-label="Terminal evidence details">
-          <article aria-label="Observed processes">
-            <header>
-              <strong>Processes</strong>
-              <span>
-                {activeTerminalSession?.latestProcessSnapshot
-                  ? activeTerminalSession.latestProcessSnapshot.phase
-                  : 'empty'}
-              </span>
-            </header>
-            {processEvidenceRows.length === 0 ? (
-              <p>No process snapshot recorded for this session</p>
-            ) : (
-              <ol>
-                {processEvidenceRows.slice(0, 6).map((row) => (
-                  <li key={`${row.pid}-${row.ppid}-${row.command}`}>
-                    <span>{row.pid.toString()}</span>
-                    <code>{row.command}</code>
-                    <small>{row.args || 'No args recorded'}</small>
-                    <small>
-                      cpu {row.cpu} · mem {row.memory}
-                    </small>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </article>
-
-          <article aria-label="Observed file deltas">
-            <header>
-              <strong>Files</strong>
-              <span>
-                {activeTerminalSession?.latestFileDeltaSnapshot
-                  ? activeTerminalSession.latestFileDeltaSnapshot.phase
-                  : 'empty'}
-              </span>
-            </header>
-            {fileEvidenceRows.length === 0 ? (
-              <p>No file delta recorded for this session</p>
-            ) : (
-              <ol>
-                {fileEvidenceRows.slice(0, 6).map((row) => (
-                  <li key={`${row.changeType}-${row.path}`}>
-                    <span>{row.changeType}</span>
-                    <code>{row.path}</code>
-                    <small>{row.size}</small>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </article>
+        <section className="terminal-evidence-strip" aria-label="Terminal evidence details" style={{ display: 'flex', gap: '1rem', overflowX: 'auto', padding: '1rem' }}>
+          <ProcessTreePanel terminalSessions={activeTerminalSession ? [activeTerminalSession] : []} />
+          <FileDeltaPanel terminalSessions={activeTerminalSession ? [activeTerminalSession] : []} />
+          <ExitTaxonomyPanel terminalSessions={activeTerminalSession ? [activeTerminalSession] : []} />
         </section>
 
         <footer className="terminal-mux__status" aria-label="Terminal metadata">

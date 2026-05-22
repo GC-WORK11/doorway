@@ -1,10 +1,11 @@
 /**
  * Doorway Automation Service
- * 
+ *
  * Manages scheduled automations and their runs.
  */
 
 import type Database from 'better-sqlite3';
+import type { TerminalSessionId, ThreadId } from '@doorway/protocol';
 import { generateId } from './id-gen.js';
 
 // ============================================================================
@@ -28,6 +29,8 @@ export interface Automation {
 export interface AutomationRun {
   readonly id: string;
   readonly automationId: string;
+  readonly threadId: ThreadId | null;
+  readonly terminalSessionId: TerminalSessionId | null;
   readonly status: 'pending' | 'running' | 'completed' | 'failed';
   readonly startedAt: string;
   readonly completedAt: string | null;
@@ -78,6 +81,8 @@ function rowToAutomationRun(row: Record<string, unknown>): AutomationRun {
   return {
     id: row.id as string,
     automationId: row.automation_id as string,
+    threadId: row.thread_id as ThreadId | null,
+    terminalSessionId: row.terminal_session_id as TerminalSessionId | null,
     status: row.status as AutomationRun['status'],
     startedAt: row.started_at as string,
     completedAt: row.completed_at as string | null,
@@ -87,10 +92,7 @@ function rowToAutomationRun(row: Record<string, unknown>): AutomationRun {
   };
 }
 
-export function createAutomation(
-  db: Database.Database,
-  input: CreateAutomationInput
-): Automation {
+export function createAutomation(db: Database.Database, input: CreateAutomationInput): Automation {
   const id = generateId('automation');
   const now = new Date().toISOString();
 
@@ -114,7 +116,9 @@ export function createAutomation(
 }
 
 export function getAutomationById(db: Database.Database, id: string): Automation | null {
-  const row = db.prepare('SELECT * FROM automations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const row = db.prepare('SELECT * FROM automations WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
   return row ? rowToAutomation(row) : null;
 }
 
@@ -161,7 +165,7 @@ export function updateAutomation(
     input.description ?? existing.description,
     input.cronExpression ?? existing.cronExpression,
     input.command ?? existing.command,
-    input.enabled !== undefined ? (input.enabled ? 1 : 0) : (existing.enabled ? 1 : 0),
+    input.enabled !== undefined ? (input.enabled ? 1 : 0) : existing.enabled ? 1 : 0,
     now,
     input.id
   );
@@ -174,32 +178,27 @@ export function deleteAutomation(db: Database.Database, id: string): boolean {
   return result.changes > 0;
 }
 
-export function setAutomationNextRun(
-  db: Database.Database,
-  id: string,
-  nextRunAt: string
-): void {
-  db.prepare('UPDATE automations SET next_run_at = ?, updated_at = ? WHERE id = ?')
-    .run(nextRunAt, new Date().toISOString(), id);
+export function setAutomationNextRun(db: Database.Database, id: string, nextRunAt: string): void {
+  db.prepare('UPDATE automations SET next_run_at = ?, updated_at = ? WHERE id = ?').run(
+    nextRunAt,
+    new Date().toISOString(),
+    id
+  );
 }
 
-export function setAutomationLastRun(
-  db: Database.Database,
-  id: string,
-  lastRunAt: string
-): void {
-  db.prepare('UPDATE automations SET last_run_at = ?, updated_at = ? WHERE id = ?')
-    .run(lastRunAt, new Date().toISOString(), id);
+export function setAutomationLastRun(db: Database.Database, id: string, lastRunAt: string): void {
+  db.prepare('UPDATE automations SET last_run_at = ?, updated_at = ? WHERE id = ?').run(
+    lastRunAt,
+    new Date().toISOString(),
+    id
+  );
 }
 
 // ============================================================================
 // Automation Runs
 // ============================================================================
 
-export function createAutomationRun(
-  db: Database.Database,
-  automationId: string
-): AutomationRun {
+export function createAutomationRun(db: Database.Database, automationId: string): AutomationRun {
   const id = generateId('automation_run');
   const now = new Date().toISOString();
 
@@ -208,12 +207,17 @@ export function createAutomationRun(
      VALUES (?, ?, 'pending', ?)`
   ).run(id, automationId, now);
 
-  const row = db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(id) as Record<string, unknown>;
+  const row = db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(id) as Record<
+    string,
+    unknown
+  >;
   return rowToAutomationRun(row);
 }
 
 export function getAutomationRunById(db: Database.Database, id: string): AutomationRun | null {
-  const row = db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const row = db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
   return row ? rowToAutomationRun(row) : null;
 }
 
@@ -241,12 +245,27 @@ export function listAutomationRuns(
   return rows.map(rowToAutomationRun);
 }
 
-export function startAutomationRun(
+export function startAutomationRun(db: Database.Database, id: string): AutomationRun | null {
+  db.prepare(
+    "UPDATE automation_runs SET status = 'running' WHERE id = ? AND status = 'pending'"
+  ).run(id);
+  return getAutomationRunById(db, id);
+}
+
+export function attachAutomationRunEvidence(
   db: Database.Database,
-  id: string
+  id: string,
+  evidence: {
+    readonly threadId?: ThreadId;
+    readonly terminalSessionId?: TerminalSessionId;
+  }
 ): AutomationRun | null {
-  db.prepare("UPDATE automation_runs SET status = 'running' WHERE id = ? AND status = 'pending'")
-    .run(id);
+  db.prepare(
+    `UPDATE automation_runs
+     SET thread_id = COALESCE(?, thread_id),
+         terminal_session_id = COALESCE(?, terminal_session_id)
+     WHERE id = ?`
+  ).run(evidence.threadId ?? null, evidence.terminalSessionId ?? null, id);
   return getAutomationRunById(db, id);
 }
 
@@ -285,10 +304,12 @@ export function failAutomationRun(
 
 export function getDueAutomations(db: Database.Database): readonly Automation[] {
   const now = new Date().toISOString();
-  const rows = db.prepare(
-    `SELECT * FROM automations 
+  const rows = db
+    .prepare(
+      `SELECT * FROM automations 
      WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
      ORDER BY next_run_at ASC`
-  ).all(now) as Record<string, unknown>[];
+    )
+    .all(now) as Record<string, unknown>[];
   return rows.map(rowToAutomation);
 }

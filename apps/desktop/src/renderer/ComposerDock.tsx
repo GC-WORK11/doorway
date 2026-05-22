@@ -4,16 +4,11 @@ import type {
   AgentPermissionProfile,
   AgentPtyMode,
   AgentWorktreeStrategy,
-  ProjectMemorySource,
-  ProjectProjection,
-  ProviderModelProjection,
 } from '@doorway/protocol';
 import {
   ProjectInstructionStatus,
-  type ComposerLaunchPreflight,
-  type ComposerMentionTarget,
   type ComposerPolicySummaryItem,
-  type SlashCommand,
+  type ComposerMentionTarget,
 } from './shared-ui';
 import { CommandPalette } from './CommandPalette';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
@@ -52,8 +47,21 @@ export function ComposerDock() {
     applyComposerMention: onApplyComposerMention,
     submitPrompt,
     projectMemorySources,
-    operationalMemory,
   } = useHarnessState();
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (!loading && prompt.trim() && !isComposerBlocked) {
+        void submitPrompt();
+      }
+    }
+    if (event.key === '/' && prompt === '') {
+      event.preventDefault();
+      setShowCommands(true);
+    }
+  };
+
   return (
     <motion.section
       className="composer-dock"
@@ -77,6 +85,7 @@ export function ComposerDock() {
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Ask Doorway to coordinate a coding task"
           aria-label="Prompt"
         />
@@ -178,7 +187,7 @@ export function ComposerDock() {
       </div>
       {activeThread && (
         <div className="composer-policy-status" aria-label="Active policy summary">
-          {policySummary.map((item: any) => (
+          {policySummary.map((item: ComposerPolicySummaryItem) => (
             <span data-tone={item.tone} key={item.label}>
               {item.label}
             </span>
@@ -205,7 +214,7 @@ export function ComposerDock() {
             exit={{ opacity: 0, y: 8, scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
           >
-            {activeMentionTargets.map((target: any) => (
+            {activeMentionTargets.map((target: ComposerMentionTarget) => (
               <button type="button" key={target.id} onClick={() => onApplyComposerMention(target)}>
                 <span>{target.label}</span>
                 <small>{target.detail}</small>

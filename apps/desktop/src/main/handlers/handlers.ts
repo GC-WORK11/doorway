@@ -43,8 +43,14 @@ import {
   recordProcessSnapshotFailed,
   recordTerminalFileDeltaSnapshot,
   recordTerminalFileDeltaFailed,
+  createAutomation,
+  deleteAutomation,
+  getAutomationById,
+  listAutomations,
+  listAutomationRuns,
+  updateAutomation,
 } from '@doorway/core';
-import { Orchestrator } from '@doorway/orchestrator';
+import { isValidCronExpression, Orchestrator, SchedulerRuntime } from '@doorway/orchestrator';
 import {
   ClaudeCodeAdapter,
   CodexCliAdapter,
@@ -113,6 +119,7 @@ import {
   mapGitDiffStatus,
   type ThreadReplayVerificationResult,
 } from './utils.js';
+import { registerStreamingHandlers, terminalStreamHub } from './streaming-ipc.js';
 
 // ============================================================================
 // Types
@@ -467,6 +474,98 @@ function registerToolHandlers(db: ReturnType<typeof import('@doorway/core').crea
       toolId,
       enabled: Boolean(req.enabled),
     });
+  });
+}
+
+type AutomationMutationRequest = {
+  readonly projectId?: string;
+  readonly id?: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly cronExpression?: string;
+  readonly command?: string;
+  readonly enabled?: boolean;
+};
+
+export function assertAutomationMutationRequest(
+  req: AutomationMutationRequest,
+  mode: 'create' | 'update'
+): void {
+  if (mode === 'update' && !req.id?.trim()) {
+    throw new Error('Automation update requires an id.');
+  }
+  if (mode === 'create' && !req.projectId?.trim()) {
+    throw new Error('Automation creation requires a project id.');
+  }
+  if (mode === 'create' && !req.name?.trim()) {
+    throw new Error('Automation creation requires a name.');
+  }
+  if (mode === 'create' && !req.command?.trim()) {
+    throw new Error('Automation creation requires a command.');
+  }
+  if (mode === 'create' && !req.cronExpression?.trim()) {
+    throw new Error('Automation creation requires a cron expression.');
+  }
+  if (req.cronExpression !== undefined && !isValidCronExpression(req.cronExpression)) {
+    throw new Error(`Invalid automation cron expression: ${req.cronExpression}`);
+  }
+}
+
+function registerAutomationHandlers(
+  db: ReturnType<typeof import('@doorway/core').createDatabase>,
+  scheduler: SchedulerRuntime
+): void {
+  ipcMain.handle('automation:list', async (_event, { projectId }) => {
+    return listAutomations(db, { projectId });
+  });
+
+  ipcMain.handle('automation:create', async (_event, req: AutomationMutationRequest) => {
+    assertAutomationMutationRequest(req, 'create');
+    return createAutomation(db, {
+      projectId: req.projectId!,
+      name: req.name!.trim(),
+      description: req.description?.trim() || undefined,
+      cronExpression: req.cronExpression!.trim(),
+      command: req.command!.trim(),
+      enabled: req.enabled,
+    });
+  });
+
+  ipcMain.handle('automation:update', async (_event, req: AutomationMutationRequest) => {
+    assertAutomationMutationRequest(req, 'update');
+    const updated = updateAutomation(db, {
+      id: req.id!.trim(),
+      ...(req.name !== undefined ? { name: req.name.trim() } : {}),
+      ...(req.description !== undefined ? { description: req.description.trim() } : {}),
+      ...(req.cronExpression !== undefined ? { cronExpression: req.cronExpression.trim() } : {}),
+      ...(req.command !== undefined ? { command: req.command.trim() } : {}),
+      ...(req.enabled !== undefined ? { enabled: req.enabled } : {}),
+    });
+    if (!updated) {
+      throw new Error(`Automation not found: ${req.id}`);
+    }
+    return updated;
+  });
+
+  ipcMain.handle('automation:delete', async (_event, { id }) => {
+    if (!id?.trim()) {
+      throw new Error('Automation deletion requires an id.');
+    }
+    return { deleted: deleteAutomation(db, id.trim()) };
+  });
+
+  ipcMain.handle('automation:runs', async (_event, { automationId }) => {
+    if (!automationId?.trim()) {
+      throw new Error('Automation history requires an automation id.');
+    }
+    return listAutomationRuns(db, automationId.trim(), { limit: 25 });
+  });
+
+  ipcMain.handle('automation:run-now', async (_event, { id }) => {
+    if (!id?.trim() || !getAutomationById(db, id.trim())) {
+      throw new Error(`Automation not found: ${id}`);
+    }
+    return scheduler.triggerAutomation(id.trim());
   });
 }
 
@@ -1277,6 +1376,7 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   const diffService = new GitDiffService(gitEngine);
   const testCommandDiscovery = new TestCommandDiscoveryService();
   const sessionManager = new SessionManager();
+  const scheduler = new SchedulerRuntime(db, { terminalManager: sessionManager, cwd });
 
   orchestrator = new Orchestrator(db, vault, {
     cwd,
@@ -1304,6 +1404,16 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
           isStdout: true,
         })
       : undefined;
+
+    // Broadcast to StreamHub for real-time streaming (fast path)
+    terminalStreamHub.broadcast({
+      type: 'data',
+      sessionId: sessionId as TerminalSessionId,
+      data,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Also send via IPC (legacy, for non-streaming renderer)
     const main = getMainWindow();
     if (main && !main.isDestroyed()) {
       main.webContents.send('terminal:data', {
@@ -1317,6 +1427,16 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   // Track session exits and record stopped in SQLite
   sessionManager.onExit((sessionId, exitCode, signal) => {
     const threadId = sessionToThread.get(sessionId);
+
+    // Broadcast exit to StreamHub for real-time streaming
+    terminalStreamHub.broadcast({
+      type: 'exit',
+      sessionId: sessionId as TerminalSessionId,
+      exitCode,
+      signal,
+      timestamp: new Date().toISOString(),
+    });
+
     if (threadId) {
       const rootPid = sessionToPid.get(sessionId);
       recordTerminalStopped(db, threadId as ThreadId, {
@@ -1361,6 +1481,7 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   registerThreadHandlers(db, threadService, orchestrator, dataDir);
   registerPermissionHandlers(db, threadService);
   registerToolHandlers(db);
+  registerAutomationHandlers(db, scheduler);
   registerClipboardHandlers(db);
   registerHandoffHandlers(db, threadService, orchestrator);
   registerAgentHandlers(db, threadService, projectService, orchestrator, sessionManager, cwd);
@@ -1383,6 +1504,11 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   );
   registerMergeHandlers(db, threadService, worktreeManager, diffService, orchestrator, cwd);
   registerBrowserHandlers(db, orchestrator, dataDir);
+
+  // Register streaming IPC handlers for real-time terminal output
+  registerStreamingHandlers();
+
+  scheduler.start();
 
   // Forward browser events to renderer
   orchestrator.browser.on('state-change', (state) => {

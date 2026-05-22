@@ -30,13 +30,23 @@ import {
 import {
   DiffPatch,
   ToolCapabilitiesPanel,
+  ProjectPluginPanel,
   WorktreeFirstActionCard,
   WorktreeReviewActions,
 } from './SurfaceControls';
 import { EvidencePanel } from './EvidencePanel';
 import { ReviewEvidence } from './ReviewEvidence';
+import { AutomationPanel } from './AutomationPanel';
 
-type Surface = 'browser' | 'terminal' | 'evidence' | 'worktrees' | 'tools' | null;
+type Surface =
+  | 'browser'
+  | 'terminal'
+  | 'evidence'
+  | 'worktrees'
+  | 'tools'
+  | 'plugins'
+  | 'automations'
+  | null;
 
 type BrowserStateView = {
   readonly url: string;
@@ -132,6 +142,13 @@ export function SurfaceDrawer() {
     onStartWorktreeRun,
     evidenceRecordCount,
     agentEvents,
+    automations,
+    automationRuns,
+    createProjectAutomation,
+    updateProjectAutomation,
+    deleteProjectAutomation,
+    loadAutomationRuns,
+    runProjectAutomationNow,
   } = useHarnessState();
 
   const onCloseSurface = () => setActiveSurface(null);
@@ -142,6 +159,8 @@ export function SurfaceDrawer() {
     evidence: 'Evidence',
     worktrees: 'Worktrees',
     tools: 'Tools',
+    plugins: 'Plugins',
+    automations: 'Automations',
   } as const;
 
   if (!activeSurface) return null;
@@ -158,6 +177,8 @@ export function SurfaceDrawer() {
     evidenceRecordCount,
     worktreeCount: worktrees.length,
     toolCount: toolCapabilities.length,
+    pluginCount: projectPlugins.length,
+    automationCount: automations.length,
   });
 
   return (
@@ -388,6 +409,21 @@ export function SurfaceDrawer() {
             onToolToggle={(toolId, enabled) => void setToolEnabled(toolId, enabled)}
             onSelectLaneTerminal={(sessionId) => void selectTerminalSession(sessionId)}
             onLoadLaneWorktreeDiff={(path) => void loadWorktreeDiff(path)}
+          />
+        )}
+
+        {activeSurface === 'plugins' && <ProjectPluginPanel plugins={projectPlugins} />}
+
+        {activeSurface === 'automations' && (
+          <AutomationPanel
+            automations={automations}
+            runHistory={automationRuns}
+            loading={loading}
+            onCreate={createProjectAutomation}
+            onUpdate={updateProjectAutomation}
+            onDelete={deleteProjectAutomation}
+            onRunHistory={loadAutomationRuns}
+            onRunNow={runProjectAutomationNow}
           />
         )}
       </div>

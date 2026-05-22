@@ -675,21 +675,29 @@ function runMigrations(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS automation_runs (
       id TEXT PRIMARY KEY,
       automation_id TEXT NOT NULL,
+      thread_id TEXT,
+      terminal_session_id TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       started_at TEXT NOT NULL,
       completed_at TEXT,
       exit_code INTEGER,
       output TEXT,
       error TEXT,
-      FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE
+      FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE,
+      FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE SET NULL,
+      FOREIGN KEY (terminal_session_id) REFERENCES terminal_sessions(id) ON DELETE SET NULL
     )
   `);
+  ensureColumn(db, 'automation_runs', 'thread_id', 'TEXT');
+  ensureColumn(db, 'automation_runs', 'terminal_session_id', 'TEXT');
 
   // Automation indexes
   db.exec('CREATE INDEX IF NOT EXISTS idx_automations_project ON automations(project_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations(enabled)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_automations_next_run ON automations(next_run_at)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id)');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id)'
+  );
   db.exec('CREATE INDEX IF NOT EXISTS idx_automation_runs_status ON automation_runs(status)');
 }
 

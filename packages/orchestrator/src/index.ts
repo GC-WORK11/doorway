@@ -26,6 +26,7 @@ import { EnvironmentOverrider, type EnvOverride } from './env.js';
 import { BrainService } from './brain/brain-service.js';
 import { BrowserSessionService } from './browser-session.js';
 import { FlightRecorderService } from './flight-recorder.js';
+import { PeerProtocolService } from './peer-protocol.js';
 import { type VaultProvider } from './brain/types.js';
 import { createSessionManager } from '@doorway/terminal-runtime';
 import {
@@ -158,6 +159,8 @@ export * from './flight-recorder.js';
 export * from './brain/index.js';
 export * from './compaction.js';
 export * from './auto-compactor.js';
+export * from './scheduler.js';
+export * from './cron.js';
 
 // ============================================================================
 // Orchestrator
@@ -179,6 +182,7 @@ export class Orchestrator {
   readonly recorder: FlightRecorderService;
   readonly brain: BrainService;
   readonly autoCompactor: AutoCompactor;
+  readonly peerProtocol: PeerProtocolService;
   private readonly autoCompactorIntegration: ReturnType<typeof createAutoCompactorIntegration>;
 
   constructor(
@@ -197,6 +201,7 @@ export class Orchestrator {
     this.browser = new BrowserSessionService();
     this.recorder = new FlightRecorderService(db);
     this.brain = new BrainService(db, vault);
+    this.peerProtocol = new PeerProtocolService(db);
 
     // Initialize auto-compactor
     this.autoCompactor = new AutoCompactor(db, autoCompactorConfig ?? { threshold: 0.8 });
@@ -273,6 +278,12 @@ export class Orchestrator {
       }
 
       const previousHandoff = this.lastHandoffs.get(threadId);
+      const peerAgents = this.peerProtocol.whoIsRunning(threadId).map((p) => ({
+        id: p.agentId,
+        displayName: p.displayName,
+        role: p.role,
+      }));
+
       const finalPrompt = await ContextCompiler.compile({
         projectId,
         goal: prompt,
@@ -282,6 +293,7 @@ export class Orchestrator {
           ? this.handoff.formatForProvider(previousHandoff, provider)
           : undefined,
         memoryLoader: this.memory,
+        peerAgents,
       });
 
       const run: OrchestratorRun = {
@@ -367,6 +379,11 @@ export class Orchestrator {
 
     const { ContextCompiler } = await import('./compiler.js');
     const previousHandoff = this.lastHandoffs.get(threadId);
+    const peerAgents = this.peerProtocol.whoIsRunning(threadId).map((p) => ({
+      id: p.agentId,
+      displayName: p.displayName,
+      role: p.role,
+    }));
 
     const finalPrompt = await ContextCompiler.compile({
       projectId,
@@ -377,6 +394,7 @@ export class Orchestrator {
         ? this.handoff.formatForProvider(previousHandoff, provider)
         : undefined,
       memoryLoader: this.memory,
+      peerAgents,
     });
 
     const run: OrchestratorRun = {
@@ -552,10 +570,40 @@ export class Orchestrator {
         exitCode,
         signal: signal ?? undefined,
       });
+
+      const { classifyTerminalExit } = require('@doorway/terminal-runtime');
+      const exitClassification = classifyTerminalExit({ exitCode, signal });
+
+      const isRecoverableFault =
+        exitClassification.kind === 'killed' ||
+        exitClassification.kind === 'segmentation_fault' ||
+        exitClassification.kind === 'general_error';
+
+      if (isRecoverableFault && (run.retryCount ?? 0) < 2) {
+        console.warn(
+          `[FaultRecovery] Session ${sessionId} crashed (${exitClassification.label}). Initiating auto-recovery respawn...`
+        );
+        run.retryCount = (run.retryCount ?? 0) + 1;
+        run.status = 'launching';
+        // Cleanup old subscriptions
+        run.unsubscribe?.();
+        run.exitUnsubscribe?.();
+
+        // Clean respawn
+        setTimeout(() => {
+          this.launchAdapterInTerminal(adapter, run, context).catch((e) => {
+            console.error(`[FaultRecovery] Failed to respawn session:`, e);
+            run.status = 'failed';
+          });
+        }, 1000);
+        return;
+      }
+
       completeTaskGraphNodeForRun(this.db, run.threadId, {
         runId: run.id as AgentRunId,
         exitCode,
       });
+      run.status = exitCode === 0 ? 'completed' : 'failed';
     });
 
     this.terminalManager.sendInput(result.sessionId, `${shellCommand}\n`);
@@ -639,6 +687,7 @@ export interface OrchestratorRun {
   sessionId?: TerminalSessionId;
   meshAgentId?: string;
   mailboxId?: string;
+  retryCount?: number;
   events: AgentEvent[];
   unsubscribe?: () => void;
   exitUnsubscribe?: () => void;

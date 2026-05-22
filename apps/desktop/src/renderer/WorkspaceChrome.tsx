@@ -4,7 +4,15 @@ import doorwayLogoUrl from './assets/logos/doorway-logo.svg?url';
 import type { ProjectMemorySource, ProjectProjection, ThreadProjection } from '@doorway/protocol';
 import { EmptyState, ProjectInstructionStatus, SidebarProjectContext } from './shared-ui';
 
-type Surface = 'browser' | 'terminal' | 'evidence' | 'worktrees' | 'tools' | null;
+type Surface =
+  | 'browser'
+  | 'terminal'
+  | 'evidence'
+  | 'worktrees'
+  | 'tools'
+  | 'plugins'
+  | 'automations'
+  | null;
 
 const surfaceLabels: Record<Exclude<Surface, null>, string> = {
   browser: 'Browser',
@@ -12,6 +20,8 @@ const surfaceLabels: Record<Exclude<Surface, null>, string> = {
   evidence: 'Evidence',
   worktrees: 'Worktrees',
   tools: 'Tools',
+  plugins: 'Plugins',
+  automations: 'Automations',
 };
 
 type SidebarThreadGroupData = {
@@ -73,6 +83,27 @@ function RailIcon({ surface }: { readonly surface: Exclude<Surface, null> }) {
           <circle cx="8" cy="7" r="1.7" />
           <circle cx="16" cy="12" r="1.7" />
           <circle cx="11" cy="17" r="1.7" />
+        </svg>
+      );
+    case 'plugins':
+      return (
+        <svg className="rail-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 4.5h8v5H8z" />
+          <path d="M5 14.5h5v5H5z" />
+          <path d="M14 14.5h5v5h-5z" />
+          <path d="M12 9.5v2.5" />
+          <path d="M7.5 12h9" />
+          <path d="M7.5 12v2.5" />
+          <path d="M16.5 12v2.5" />
+        </svg>
+      );
+    case 'automations':
+      return (
+        <svg className="rail-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 7.5v5l3 2" />
+          <path d="M7 4.5 5 6.5" />
+          <path d="m17 4.5 2 2" />
         </svg>
       );
   }
@@ -235,7 +266,17 @@ export function WorkspaceChrome() {
   return (
     <>
       <nav className="utility-rail" aria-label="Surfaces">
-        {(['browser', 'terminal', 'evidence', 'worktrees', 'tools'] as const).map((surface) => (
+        {(
+          [
+            'browser',
+            'terminal',
+            'evidence',
+            'worktrees',
+            'tools',
+            'plugins',
+            'automations',
+          ] as const
+        ).map((surface) => (
           <RailButton
             key={surface}
             surface={surface}

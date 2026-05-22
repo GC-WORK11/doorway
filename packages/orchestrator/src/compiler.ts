@@ -11,6 +11,7 @@ export interface CompilerContext {
   readonly importantFiles?: readonly string[];
   readonly previousSummary?: string;
   readonly memoryLoader?: ProjectMemoryLoader;
+  readonly peerAgents?: readonly { readonly id: string; readonly role: string; readonly displayName: string; }[];
 }
 
 export function relevantFileContentForPrompt(content: string): string {
@@ -42,6 +43,25 @@ export class ContextCompiler {
 
     if (ctx.previousSummary) {
       prompt += `PREVIOUS PROGRESS:\n${ctx.previousSummary}\n\n`;
+    }
+
+    if (ctx.peerAgents && ctx.peerAgents.length > 0) {
+      prompt += `PEER AGENT CONTEXT (CROSS-THREADING):\n`;
+      prompt += `You are operating in a multi-agent environment. The following peer agents are currently running alongside you in this thread:\n`;
+      for (const peer of ctx.peerAgents) {
+        prompt += `- ${peer.displayName} (ID: ${peer.id}, Role: ${peer.role})\n`;
+      }
+      prompt += `\nYou can communicate with them using the terminal action block. To send a message, emit the following EXACT format to your standard output:\n\n`;
+      prompt += `\`\`\`doorway-action\n`;
+      prompt += `type: send_message\n`;
+      prompt += `to: [AGENT ID OR NAME]\n`;
+      prompt += `kind: question\n`;
+      prompt += `message: "Your message here"\n`;
+      prompt += `\`\`\`\n\n`;
+      prompt += `To pull messages sent to you, emit:\n\n`;
+      prompt += `\`\`\`doorway-action\n`;
+      prompt += `type: pull_messages\n`;
+      prompt += `\`\`\`\n\n`;
     }
 
     // Add project structure

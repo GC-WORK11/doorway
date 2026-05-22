@@ -1117,6 +1117,7 @@ export interface TerminalProjection {
   readonly latestProcessSnapshot?: ProcessSnapshotProjection;
   readonly latestFileDeltaSnapshot?: TerminalFileDeltaSnapshotProjection;
   readonly lastOutput?: string;
+  readonly createdAt: Date;
   readonly evidence?: readonly EvidenceRef[];
 }
 

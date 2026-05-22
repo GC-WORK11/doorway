@@ -43,6 +43,12 @@ const doorwayAPI = {
   listToolCapabilities: (req) => ipcRenderer.invoke('tools:list-capabilities', req || {}),
   listToolLanes: (threadId) => ipcRenderer.invoke('tools:list-lanes', { threadId }),
   setToolEnabled: (req) => ipcRenderer.invoke('tools:set-enabled', req),
+  listAutomations: (req) => ipcRenderer.invoke('automation:list', req),
+  createAutomation: (req) => ipcRenderer.invoke('automation:create', req),
+  updateAutomation: (req) => ipcRenderer.invoke('automation:update', req),
+  deleteAutomation: (id) => ipcRenderer.invoke('automation:delete', { id }),
+  getAutomationRuns: (automationId) => ipcRenderer.invoke('automation:runs', { automationId }),
+  runAutomationNow: (id) => ipcRenderer.invoke('automation:run-now', { id }),
   createHandoff: (req) => ipcRenderer.invoke('handoff:create', req),
   copyText: (req) => ipcRenderer.invoke('clipboard:write-text', req),
   openPath: (req) => ipcRenderer.invoke('file:open-path', req),
@@ -109,6 +115,18 @@ const doorwayAPI = {
     const handler = (event, payload) => callback(payload);
     ipcRenderer.on('browser:action', handler);
     return () => ipcRenderer.removeListener('browser:action', handler);
+  },
+
+  // Streaming IPC for real-time terminal
+  terminal: {
+    startStream: (sessionId) => ipcRenderer.invoke('terminal:stream-start', { sessionId }),
+    stopStream: (sessionId) => ipcRenderer.invoke('terminal:stream-stop', { sessionId }),
+    getActiveStreams: () => ipcRenderer.invoke('terminal:stream-active-sessions'),
+    onStream: (callback) => {
+      const handler = (event, payload) => callback(payload);
+      ipcRenderer.on('terminal:stream', handler);
+      return () => ipcRenderer.removeListener('terminal:stream', handler);
+    },
   },
 };
 

@@ -18,7 +18,9 @@ export type SlashCommand =
   | '/test'
   | '/browser'
   | '/merge'
-  | '/tools';
+  | '/tools'
+  | '/plugins'
+  | '/automations';
 
 export type ComposerMentionTarget = {
   readonly id: string;
@@ -141,14 +143,26 @@ export function FirstRunProjectPanel({
       </div>
       <div className="first-run-panel__checks" aria-label="Local evidence surfaces">
         <span>
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
             <circle cx="8" cy="8" r="6" />
             <path d="M5.5 8 7 9.5 10.5 6" />
           </svg>
           SQLite ledger
         </span>
         <span>
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
             <circle cx="5" cy="5" r="2" />
             <circle cx="11" cy="5" r="2" />
             <circle cx="8" cy="11" r="2" />
@@ -157,7 +171,13 @@ export function FirstRunProjectPanel({
           Git worktrees
         </span>
         <span>
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
             <path d="M8 2 10.5 5.5H14l-3.5 3.5 1.5 4-4-2.5-4 2.5 1.5-4L2 5.5h3.5Z" />
           </svg>
           Replay evidence
@@ -217,7 +237,13 @@ export function EmptyProjectThreadPanel({
       </div>
       <div className="thread-starter-panel__meta" aria-label="Project runtime metadata">
         <span>
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
             <circle cx="8" cy="8" r="6" />
             <path d="M8 5v3l2 2" strokeLinecap="round" />
           </svg>
@@ -225,7 +251,13 @@ export function EmptyProjectThreadPanel({
         </span>
         {activeProject.packageManager && (
           <span>
-            <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
               <path d="M4 4l8 8M4 12l8-8" />
             </svg>
             {activeProject.packageManager}

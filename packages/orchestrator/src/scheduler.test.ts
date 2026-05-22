@@ -2,16 +2,18 @@
  * Scheduler Tests
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createDatabase,
-  generateId,
   createAutomation,
+  getEvents,
   getAutomationById,
   listAutomations,
+  listTerminalProjections,
+  openProject,
   updateAutomation,
   deleteAutomation,
   createAutomationRun,
@@ -26,6 +28,59 @@ import {
   SchedulerRuntime,
 } from './scheduler.js';
 import type Database from 'better-sqlite3';
+import type { AgentTerminalRuntime, TerminalLaunchResult } from './index.js';
+
+class SchedulerTerminalRuntime implements AgentTerminalRuntime {
+  readonly inputs: string[] = [];
+  private readonly dataCallbacks = new Set<(sessionId: string, data: string) => void>();
+  private readonly exitCallbacks = new Set<
+    (sessionId: string, exitCode: number, signal: string | null) => void
+  >();
+  private launchCount = 0;
+
+  async launch(): Promise<TerminalLaunchResult> {
+    this.launchCount += 1;
+    return {
+      sessionId: `term_automation_${this.launchCount}`,
+      pid: 4200 + this.launchCount,
+      startedAt: new Date('2026-05-22T01:00:00.000Z'),
+    };
+  }
+
+  async launchCommand(): Promise<TerminalLaunchResult> {
+    throw new Error('Scheduler should write commands into a Doorway terminal session.');
+  }
+
+  sendInput(sessionId: string, data: string): void {
+    this.inputs.push(data);
+    queueMicrotask(() => {
+      const failed = data.includes('false');
+      const output = failed ? 'automation failed\n' : 'hello world\n';
+      for (const callback of this.dataCallbacks) {
+        callback(sessionId, output);
+      }
+      for (const callback of this.exitCallbacks) {
+        callback(sessionId, failed ? 1 : 0, null);
+      }
+    });
+  }
+
+  stop(): number {
+    return 0;
+  }
+
+  onData(callback: (sessionId: string, data: string) => void): () => void {
+    this.dataCallbacks.add(callback);
+    return () => this.dataCallbacks.delete(callback);
+  }
+
+  onExit(
+    callback: (sessionId: string, exitCode: number, signal: string | null) => void
+  ): () => void {
+    this.exitCallbacks.add(callback);
+    return () => this.exitCallbacks.delete(callback);
+  }
+}
 
 describe('Cron Parser', () => {
   describe('parseCronExpression', () => {
@@ -53,7 +108,7 @@ describe('Cron Parser', () => {
       const result = parseCronExpression('0 9-17 * * 1-5');
       expect(result).not.toBeNull();
       expect(result!.hour).toEqual([9, 10, 11, 12, 13, 14, 15, 16, 17]);
-      expect(result!.weekday).toEqual([1, 2, 3, 4, 5]);
+      expect(result!.dayOfWeek).toEqual([1, 2, 3, 4, 5]);
     });
 
     it('parses comma-separated values', () => {
@@ -109,12 +164,12 @@ describe('Cron Parser', () => {
   describe('describeCronExpression', () => {
     it('describes simple cron', () => {
       const description = describeCronExpression('0 9 * * *');
-      expect(description).toContain('hours: 9');
+      expect(description).toContain('At 09:00');
     });
 
     it('describes step cron', () => {
       const description = describeCronExpression('*/15 * * * *');
-      expect(description).toContain('minutes:');
+      expect(description).toContain('At minute */15');
     });
 
     it('returns null for invalid cron', () => {
@@ -139,7 +194,8 @@ describe('SchedulerRuntime', () => {
 
   describe('triggerAutomation', () => {
     it('executes an automation and records the run', async () => {
-      const scheduler = new SchedulerRuntime(db);
+      const terminalManager = new SchedulerTerminalRuntime();
+      const scheduler = new SchedulerRuntime(db, { terminalManager });
 
       const automation = createAutomation(db, {
         name: 'Test Automation',
@@ -152,6 +208,8 @@ describe('SchedulerRuntime', () => {
       expect(run!.status).toBe('completed');
       expect(run!.exitCode).toBe(0);
       expect(run!.output).toContain('hello world');
+      expect(run!.terminalSessionId).toBeNull();
+      expect(terminalManager.inputs[0]).toContain('echo "hello world"');
     });
 
     it('returns null for non-existent automation', async () => {
@@ -161,7 +219,9 @@ describe('SchedulerRuntime', () => {
     });
 
     it('handles command failures gracefully', async () => {
-      const scheduler = new SchedulerRuntime(db);
+      const scheduler = new SchedulerRuntime(db, {
+        terminalManager: new SchedulerTerminalRuntime(),
+      });
 
       const automation = createAutomation(db, {
         name: 'Failing Automation',
@@ -174,16 +234,52 @@ describe('SchedulerRuntime', () => {
       expect(run!.status).toBe('failed');
       expect(run!.exitCode).toBe(1);
     });
+
+    it('persists terminal evidence in an automation thread for project automations', async () => {
+      const projectPath = join(dataPath, 'project');
+      await mkdir(projectPath);
+      const project = openProject(db, { path: projectPath, mode: 'non_git' });
+      const scheduler = new SchedulerRuntime(db, {
+        terminalManager: new SchedulerTerminalRuntime(),
+      });
+      const automation = createAutomation(db, {
+        projectId: project.id,
+        name: 'Project Automation',
+        cronExpression: '0 9 * * *',
+        command: 'echo "hello world"',
+      });
+
+      const run = await scheduler.triggerAutomation(automation.id);
+
+      expect(run?.threadId).toBeTruthy();
+      expect(run?.terminalSessionId).toBe('term_automation_1');
+      const terminal = listTerminalProjections(db, run!.threadId!)[0];
+      expect(terminal).toMatchObject({
+        id: 'term_automation_1',
+        status: 'stopped',
+        command: 'echo "hello world"',
+        lastOutput: 'hello world\n',
+      });
+      expect(getEvents(db, run!.threadId!).map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          'thread.created',
+          'terminal.started',
+          'terminal.input',
+          'terminal.output',
+          'terminal.stopped',
+        ])
+      );
+    });
   });
 
   describe('start/stop', () => {
     it('starts and stops the scheduler', () => {
       const scheduler = new SchedulerRuntime(db);
       expect(scheduler.isRunning()).toBe(false);
-      
+
       scheduler.start();
       expect(scheduler.isRunning()).toBe(true);
-      
+
       scheduler.stop();
       expect(scheduler.isRunning()).toBe(false);
     });
@@ -192,7 +288,7 @@ describe('SchedulerRuntime', () => {
       const scheduler = new SchedulerRuntime(db);
       scheduler.start();
       scheduler.start(); // Should be idempotent
-      
+
       expect(scheduler.isRunning()).toBe(true);
       scheduler.stop();
     });
@@ -275,8 +371,18 @@ describe('Automation CRUD', () => {
     });
 
     it('filters by enabled status', () => {
-      createAutomation(db, { name: 'Enabled', cronExpression: '0 9 * * *', command: 'echo 1', enabled: true });
-      createAutomation(db, { name: 'Disabled', cronExpression: '0 10 * * *', command: 'echo 2', enabled: false });
+      createAutomation(db, {
+        name: 'Enabled',
+        cronExpression: '0 9 * * *',
+        command: 'echo 1',
+        enabled: true,
+      });
+      createAutomation(db, {
+        name: 'Disabled',
+        cronExpression: '0 10 * * *',
+        command: 'echo 2',
+        enabled: false,
+      });
 
       const enabled = listAutomations(db, { enabled: true });
       expect(enabled).toHaveLength(1);

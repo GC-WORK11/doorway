@@ -39,6 +39,15 @@ interface TerminalSurfaceWritePlan {
   readonly nextState: TerminalSurfaceWriteState;
 }
 
+interface LiveTerminalDataPayload {
+  readonly sessionId: string;
+  readonly data: string;
+}
+
+interface LiveTerminalBridge {
+  onTerminalData?(callback: (payload: LiveTerminalDataPayload) => void): () => void;
+}
+
 function terminalSurfaceWritePlan(
   state: TerminalSurfaceWriteState,
   chunks: readonly TranscriptChunk[],
@@ -210,6 +219,18 @@ export function TerminalSurface({
     };
   }, []);
 
+  // Native 60fps Live Streaming via IPC
+  useEffect(() => {
+    if (!activeTerminalSessionId) return;
+    const doorwayBridge = (window as unknown as { doorway?: LiveTerminalBridge }).doorway;
+    const unsubscribe = doorwayBridge?.onTerminalData?.((payload) => {
+      if (payload.sessionId === activeTerminalSessionId && terminalRef.current) {
+        terminalRef.current.write(payload.data);
+      }
+    });
+    return unsubscribe;
+  }, [activeTerminalSessionId]);
+
   useEffect(() => {
     const terminal = terminalRef.current;
     if (terminal) {
@@ -229,11 +250,13 @@ export function TerminalSurface({
       fallbackText,
       activeTerminalSessionId
     );
+    // Only reset if the session changed or we lost data.
+    // Live appends are handled by the native onTerminalData IPC subscriber above!
     if (plan.reset) {
       terminal.reset();
-    }
-    if (plan.text) {
-      terminal.write(plan.text);
+      if (plan.text) {
+        terminal.write(plan.text);
+      }
     }
     writeStateRef.current = plan.nextState;
   }, [activeTerminalSessionId, fallbackText, terminalTranscript]);

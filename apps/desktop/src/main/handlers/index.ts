@@ -34,4 +34,4 @@ export {
 } from './utils.js';
 
 // Re-export setup functions
-export { setupMainHandlers, setMainWindow } from './handlers.js';
+export { assertAutomationMutationRequest, setupMainHandlers, setMainWindow } from './handlers.js';

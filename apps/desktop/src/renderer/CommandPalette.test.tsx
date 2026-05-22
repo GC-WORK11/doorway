@@ -17,6 +17,8 @@ describe('CommandPalette', () => {
     expect(html).toContain('Search commands');
     expect(html).toContain('/build');
     expect(html).toContain('/browser');
+    expect(html).toContain('/plugins');
+    expect(html).toContain('/automations');
     expect(html).toContain('Launch an implementation-focused agent run.');
   });
 });

@@ -52,3 +52,8 @@ temp/
 *.dll
 *.so
 *.dylib
+
+# Embedded repos
+OTHER-CLI-TOOL-AND-HARNESSES/hermes-agent/
+OTHER-CLI-TOOL-AND-HARNESSES/codex-app/codex-desktop-linux/
+OTHER-CLI-TOOL-AND-HARNESSES/codex-cli/codex/

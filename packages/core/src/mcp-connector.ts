@@ -310,7 +310,7 @@ export class McpConnector extends EventEmitter {
 
   private processBuffer(buffer: string, onRemaining: (remaining: string) => void): void {
     const lines = buffer.split('\n');
-    let remaining = lines.pop() ?? '';
+    const remaining = lines.pop() ?? '';
 
     for (const line of lines) {
       if (line.trim()) {

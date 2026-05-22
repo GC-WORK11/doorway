@@ -7,6 +7,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { readPersistedThreadState } from './thread-refresh';
 import type {
+  Automation,
+  AutomationRun,
+  CreateAutomationInput,
+  UpdateAutomationInput,
+} from '@doorway/core';
+import type {
   AgentLaunchOptions,
   CompactCheckpointProjection,
   DiffProjection,
@@ -137,6 +143,12 @@ interface DoorwayAPI {
     toolId: string;
     enabled: boolean;
   }): Promise<ToolCapabilityProjection>;
+  listAutomations(req: { projectId: string }): Promise<Automation[]>;
+  createAutomation(req: CreateAutomationInput): Promise<Automation>;
+  updateAutomation(req: UpdateAutomationInput): Promise<Automation>;
+  deleteAutomation(id: string): Promise<{ deleted: boolean }>;
+  getAutomationRuns(automationId: string): Promise<AutomationRun[]>;
+  runAutomationNow(id: string): Promise<AutomationRun | null>;
 
   createThread(req: {
     projectId: string;
@@ -321,6 +333,12 @@ export function createUnavailableDoorwayAPI(): DoorwayAPI {
     listToolCapabilities: async () => [],
     listToolLanes: async () => [],
     setToolEnabled: async () => bridgeUnavailable('setToolEnabled'),
+    listAutomations: async () => [],
+    createAutomation: async () => bridgeUnavailable('createAutomation'),
+    updateAutomation: async () => bridgeUnavailable('updateAutomation'),
+    deleteAutomation: async () => bridgeUnavailable('deleteAutomation'),
+    getAutomationRuns: async () => [],
+    runAutomationNow: async () => bridgeUnavailable('runAutomationNow'),
 
     createThread: async () => bridgeUnavailable('createThread'),
     getThread: async () => null,
@@ -394,6 +412,8 @@ export function useDoorway() {
   const [providerModels, setProviderModels] = useState<ProviderModelProjection[]>([]);
   const [toolCapabilities, setToolCapabilities] = useState<ToolCapabilityProjection[]>([]);
   const [toolLanes, setToolLanes] = useState<ToolLaneProjection[]>([]);
+  const [automations, setAutomations] = useState<Automation[]>([]);
+  const [automationRuns, setAutomationRuns] = useState<Record<string, AutomationRun[]>>({});
   const [threads, setThreads] = useState<ThreadProjection[]>([]);
   const [activeThread, setActiveThread] = useState<ThreadProjection | null>(null);
   const [messages, setMessages] = useState<MessageProjection[]>([]);
@@ -469,28 +489,45 @@ export function useDoorway() {
         } else {
           void loadTerminalTranscript(payload.sessionId);
         }
-        if (activeThread) {
-          void Promise.all([
-            api.getThreadPeerMessages(activeThread.id),
-            api.getThreadEvents(activeThread.id),
-            api.listToolLanes(activeThread.id),
-            api.getThreadOperationalMemory(activeThread.id),
-          ]).then(
-            ([nextPeerMessages, nextEvents, nextToolLanes, nextOperationalMemory]) => {
-              setPeerMessages(nextPeerMessages);
-              setThreadEvents(nextEvents);
-              setToolLanes(nextToolLanes);
-              setOperationalMemory(nextOperationalMemory);
-            },
-            (err: unknown) => {
-              setError(err instanceof Error ? err.message : 'Failed to load terminal evidence');
-            }
-          );
-        }
       }
     });
     return unsubscribe;
-  }, [activeTerminalSessionId, activeThread]);
+  }, [activeTerminalSessionId]);
+
+  useEffect(() => {
+    if (!activeThread) return;
+    const unsubscribe = api.onDbChange((payload) => {
+      const p = payload as { table?: string; action?: string; threadId?: string };
+      // Only reload if the change is relevant to the active thread or a global table
+      if (!p.threadId || p.threadId === activeThread.id) {
+        void Promise.all([
+          api.getThreadPeerMessages(activeThread.id),
+          api.getThreadEvents(activeThread.id),
+          api.listToolLanes(activeThread.id),
+          api.getThreadOperationalMemory(activeThread.id),
+          api.getThreadTaskGraphs(activeThread.id),
+        ]).then(
+          ([
+            nextPeerMessages,
+            nextEvents,
+            nextToolLanes,
+            nextOperationalMemory,
+            nextTaskGraphs,
+          ]) => {
+            setPeerMessages(nextPeerMessages);
+            setThreadEvents(nextEvents);
+            setToolLanes(nextToolLanes);
+            setOperationalMemory(nextOperationalMemory);
+            setTaskGraphs(nextTaskGraphs);
+          },
+          (err: unknown) => {
+            console.error('Failed to process db change sync', err);
+          }
+        );
+      }
+    });
+    return unsubscribe;
+  }, [activeThread]);
 
   useEffect(() => {
     void loadProjects();
@@ -556,6 +593,19 @@ export function useDoorway() {
     } catch (err) {
       setProjectPlugins([]);
       setError(err instanceof Error ? err.message : 'Failed to load project plugins');
+    }
+  }, []);
+
+  const loadAutomations = useCallback(async (projectId?: string) => {
+    if (!projectId) {
+      setAutomations([]);
+      setAutomationRuns({});
+      return;
+    }
+    try {
+      setAutomations(await api.listAutomations({ projectId }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load automations');
     }
   }, []);
 
@@ -770,6 +820,7 @@ export function useDoorway() {
         setActiveProject(project);
         void loadProjectMemorySources(project.path);
         void loadProjectPlugins(project.id);
+        void loadAutomations(project.id);
         void loadThreads(project.id);
         return project;
       } catch (err) {
@@ -777,7 +828,7 @@ export function useDoorway() {
         throw err;
       }
     },
-    [loadProjectMemorySources, loadProjectPlugins, loadThreads]
+    [loadProjectMemorySources, loadProjectPlugins, loadAutomations, loadThreads]
   );
 
   const selectProject = useCallback(
@@ -786,15 +837,64 @@ export function useDoorway() {
       if (project) {
         void loadProjectMemorySources(project.path);
         void loadProjectPlugins(project.id);
+        void loadAutomations(project.id);
         void loadThreads(project.id);
       } else {
         setProjectMemorySources([]);
         setProjectPlugins([]);
+        setAutomations([]);
+        setAutomationRuns({});
         setThreads([]);
         setActiveThread(null);
       }
     },
-    [loadProjectMemorySources, loadProjectPlugins, loadThreads]
+    [loadProjectMemorySources, loadProjectPlugins, loadAutomations, loadThreads]
+  );
+
+  const createProjectAutomation = useCallback(
+    async (input: CreateAutomationInput) => {
+      if (!activeProject) throw new Error('Select a project before creating an automation.');
+      const automation = await api.createAutomation({ ...input, projectId: activeProject.id });
+      await loadAutomations(activeProject.id);
+      return automation;
+    },
+    [activeProject, loadAutomations]
+  );
+
+  const updateProjectAutomation = useCallback(
+    async (input: UpdateAutomationInput) => {
+      const automation = await api.updateAutomation(input);
+      await loadAutomations(activeProject?.id);
+      return automation;
+    },
+    [activeProject, loadAutomations]
+  );
+
+  const deleteProjectAutomation = useCallback(
+    async (id: string) => {
+      const result = await api.deleteAutomation(id);
+      await loadAutomations(activeProject?.id);
+      return result;
+    },
+    [activeProject, loadAutomations]
+  );
+
+  const loadAutomationRuns = useCallback(async (id: string) => {
+    const runs = await api.getAutomationRuns(id);
+    setAutomationRuns((prev) => ({ ...prev, [id]: runs }));
+    return runs;
+  }, []);
+
+  const runProjectAutomationNow = useCallback(
+    async (id: string) => {
+      const run = await api.runAutomationNow(id);
+      await Promise.all([loadAutomations(activeProject?.id), loadAutomationRuns(id)]);
+      if (run?.threadId) {
+        await loadThreads(activeProject?.id);
+      }
+      return run;
+    },
+    [activeProject, loadAutomations, loadAutomationRuns, loadThreads]
   );
 
   useEffect(() => {
@@ -1057,11 +1157,15 @@ export function useDoorway() {
         }
       }
       if (targetThreadId) {
-        await Promise.all([loadTerminalSessions(targetThreadId), loadToolLanes(targetThreadId)]);
+        await Promise.all([
+          loadTerminalSessions(targetThreadId),
+          loadToolLanes(targetThreadId),
+          loadMessages(targetThreadId),
+        ]);
       }
       return result.runId;
     },
-    [activeProject, activeThread, loadTerminalSessions, loadToolLanes]
+    [activeProject, activeThread, loadTerminalSessions, loadToolLanes, loadMessages]
   );
 
   const launchBestOfN = useCallback(
@@ -1209,6 +1313,8 @@ export function useDoorway() {
     providerModels,
     toolCapabilities,
     toolLanes,
+    automations,
+    automationRuns,
     threads,
     activeThread,
     messages,
@@ -1274,6 +1380,11 @@ export function useDoorway() {
     openPath,
     toggleBrowserControl,
     setToolEnabled,
+    createProjectAutomation,
+    updateProjectAutomation,
+    deleteProjectAutomation,
+    loadAutomationRuns,
+    runProjectAutomationNow,
     setError,
   };
 }

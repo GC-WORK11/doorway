@@ -340,6 +340,67 @@ export function WorktreeFirstActionCard({
   );
 }
 
+export function ProjectPluginPanel({
+  plugins,
+}: {
+  readonly plugins: readonly ProjectPluginProjection[];
+}) {
+  return (
+    <article className="project-plugin-panel" aria-label="Project plugins">
+      <header>
+        <strong>Project plugins</strong>
+        <span>{plugins.length > 0 ? `${plugins.length} manifests` : 'Unconfigured'}</span>
+      </header>
+      {plugins.length === 0 ? (
+        <EmptyState
+          title="No project plugins discovered"
+          body="Doorway reads .doorway/plugins/*/doorway.plugin.json before a plugin can be trusted or enabled."
+        />
+      ) : (
+        <div className="project-plugin-panel__list">
+          {plugins.map((plugin) => (
+            <section
+              className="project-plugin-row"
+              data-status={plugin.status}
+              key={plugin.manifestPath}
+            >
+              <div className="project-plugin-row__head">
+                <strong>{plugin.name}</strong>
+                <span>{plugin.status}</span>
+              </div>
+              <div className="project-plugin-row__meta">
+                <code>{plugin.id}</code>
+                <span>{plugin.version}</span>
+                <span>{plugin.capabilities.length} capabilities</span>
+              </div>
+              {plugin.status === 'invalid' ? (
+                <p>{plugin.problem}</p>
+              ) : (
+                <dl>
+                  <div>
+                    <dt>Filesystem</dt>
+                    <dd>
+                      {plugin.filesystemRead.length} read / {plugin.filesystemWrite.length} write
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Network</dt>
+                    <dd>{plugin.networkHosts.length} allowed hosts</dd>
+                  </div>
+                  <div>
+                    <dt>Entry</dt>
+                    <dd>{plugin.entryCommand}</dd>
+                  </div>
+                </dl>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
 export function ToolCapabilitiesPanel({
   tools,
   lanes,
@@ -415,58 +476,7 @@ export function ToolCapabilitiesPanel({
           </div>
         )}
       </article>
-      <article className="project-plugin-panel" aria-label="Project plugins">
-        <header>
-          <strong>Project plugins</strong>
-          <span>{plugins.length > 0 ? `${plugins.length} manifests` : 'Unconfigured'}</span>
-        </header>
-        {plugins.length === 0 ? (
-          <EmptyState
-            title="No project plugins discovered"
-            body="Doorway reads .doorway/plugins/*/doorway.plugin.json before a plugin can be trusted or enabled."
-          />
-        ) : (
-          <div className="project-plugin-panel__list">
-            {plugins.map((plugin) => (
-              <section
-                className="project-plugin-row"
-                data-status={plugin.status}
-                key={plugin.manifestPath}
-              >
-                <div className="project-plugin-row__head">
-                  <strong>{plugin.name}</strong>
-                  <span>{plugin.status}</span>
-                </div>
-                <div className="project-plugin-row__meta">
-                  <code>{plugin.id}</code>
-                  <span>{plugin.version}</span>
-                  <span>{plugin.capabilities.length} capabilities</span>
-                </div>
-                {plugin.status === 'invalid' ? (
-                  <p>{plugin.problem}</p>
-                ) : (
-                  <dl>
-                    <div>
-                      <dt>Filesystem</dt>
-                      <dd>
-                        {plugin.filesystemRead.length} read / {plugin.filesystemWrite.length} write
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Network</dt>
-                      <dd>{plugin.networkHosts.length} allowed hosts</dd>
-                    </div>
-                    <div>
-                      <dt>Entry</dt>
-                      <dd>{plugin.entryCommand}</dd>
-                    </div>
-                  </dl>
-                )}
-              </section>
-            ))}
-          </div>
-        )}
-      </article>
+      <ProjectPluginPanel plugins={plugins} />
       {lanes.length > 0 && (
         <article className="tool-lane-supervisor" aria-label="Active tool lanes">
           <header>

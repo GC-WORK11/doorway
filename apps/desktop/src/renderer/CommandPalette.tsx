@@ -69,6 +69,18 @@ const commandPaletteItems: readonly CommandPaletteItem[] = [
     detail: 'Inspect tool capabilities and policy state.',
     keywords: ['tools', 'capabilities', 'policy'],
   },
+  {
+    command: '/plugins',
+    label: 'Plugins surface',
+    detail: 'Inspect discovered project plugin manifests and permissions.',
+    keywords: ['plugins', 'manifests', 'permissions', 'mcp'],
+  },
+  {
+    command: '/automations',
+    label: 'Automations surface',
+    detail: 'Schedule project commands and inspect real run history.',
+    keywords: ['automations', 'schedule', 'cron', 'runs'],
+  },
 ];
 
 interface CommandPaletteProps {

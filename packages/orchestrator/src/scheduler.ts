@@ -1,400 +1,228 @@
 /**
- * Doorway Scheduler Module
- * 
- * Cron expression parsing and scheduling runtime for automations.
+ * Scheduler - Cron-based automation execution
  */
 
 import type Database from 'better-sqlite3';
-import { spawn } from 'child_process';
+import type { Automation, AutomationRun } from '@doorway/core';
 import {
-  type Automation,
-  type AutomationRun,
+  appendTerminalChunk,
+  attachAutomationRunEvidence,
   createAutomationRun,
+  createThread,
+  listAutomations,
+  getAutomationRunById,
+  getProject,
+  recordEvent,
+  recordTerminalInput,
+  recordTerminalStarted,
+  recordTerminalStopped,
   startAutomationRun,
   completeAutomationRun,
   failAutomationRun,
-  getDueAutomations,
-  setAutomationLastRun,
-  setAutomationNextRun,
-  getAutomationById,
 } from '@doorway/core';
-import { generateId } from '@doorway/core';
+import { createSessionManager } from '@doorway/terminal-runtime';
+import type { ProjectId, TerminalSessionId, ThreadId } from '@doorway/protocol';
+import type { AgentTerminalRuntime } from './index.js';
+import { getNextRunTime } from './cron.js';
 
-// ============================================================================
-// Cron Parser
-// ============================================================================
-
-/**
- * Parse a cron expression and calculate the next run time.
- * Supports standard 5-field cron: minute hour day month weekday
- */
-export function parseCronExpression(expression: string): CronFields | null {
-  const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) {
-    return null;
-  }
-
-  const [minute, hour, day, month, weekday] = parts;
-
-  const minuteField = parseCronField(minute, 0, 59);
-  const hourField = parseCronField(hour, 0, 23);
-  const dayField = parseCronField(day, 1, 31);
-  const monthField = parseCronField(month, 1, 12);
-  const weekdayField = parseCronField(weekday, 0, 6);
-
-  // If any field is null (invalid), the whole expression is invalid
-  if (minuteField === null || hourField === null || dayField === null || monthField === null || weekdayField === null) {
-    return null;
-  }
-
-  return {
-    minute: minuteField,
-    hour: hourField,
-    day: dayField,
-    month: monthField,
-    weekday: weekdayField,
-  };
-}
-
-interface CronFields {
-  minute: number[] | null;
-  hour: number[] | null;
-  day: number[] | null;
-  month: number[] | null;
-  weekday: number[] | null;
-}
-
-function parseCronField(value: string, min: number, max: number): number[] | null {
-  if (value === '*') {
-    return Array.from({ length: max - min + 1 }, (_, i) => min + i);
-  }
-
-  const result: number[] = [];
-  const parts = value.split(',');
-
-  for (const part of parts) {
-    // Handle step values (*/5, 0-30/5)
-    const stepMatch = part.match(/^(\*|[\d-]+)\/(\d+)$/);
-    if (stepMatch) {
-      const range = stepMatch[1] === '*' ? `${min}-${max}` : stepMatch[1];
-      const step = parseInt(stepMatch[2], 10);
-      const rangeResult = parseRange(range, min, max);
-      if (!rangeResult) return null;
-      for (let i = rangeResult.min; i <= rangeResult.max; i += step) {
-        if (!result.includes(i)) result.push(i);
-      }
-      continue;
-    }
-
-    // Handle range (1-5)
-    const rangeMatch = part.match(/^(\d+)-(\d+)$/);
-    if (rangeMatch) {
-      const rangeResult = parseRange(part, min, max);
-      if (!rangeResult) return null;
-      for (let i = rangeResult.min; i <= rangeResult.max; i++) {
-        if (!result.includes(i)) result.push(i);
-      }
-      continue;
-    }
-
-  // Handle single value
-  const num = parseInt(part, 10);
-  if (isNaN(num) || num < min || num > max) {
-    return null;
-  }
-  if (!result.includes(num)) result.push(num);
-  }
-
-  return result.length > 0 ? result.sort((a, b) => a - b) : null;
-}
-
-function parseRange(value: string, min: number, max: number): { min: number; max: number } | null {
-  if (value === '*') {
-    return { min, max };
-  }
-  const match = value.match(/^(\d+)-(\d+)$/);
-  if (!match) {
-    const num = parseInt(value, 10);
-    if (isNaN(num) || num < min || num > max) return null;
-    return { min: num, max: num };
-  }
-  const minVal = parseInt(match[1], 10);
-  const maxVal = parseInt(match[2], 10);
-  if (minVal < min || maxVal > max || minVal > maxVal) return null;
-  return { min: minVal, max: maxVal };
-}
+export {
+  describeCronExpression,
+  getNextRunTime,
+  isValidCronExpression,
+  parseCronExpression,
+  type ParsedCronExpression,
+} from './cron.js';
 
 /**
- * Calculate the next occurrence time based on a cron expression.
+ * SchedulerRuntime - Executes automations based on cron schedules
  */
-export function getNextRunTime(expression: string, from: Date = new Date()): Date | null {
-  const fields = parseCronExpression(expression);
-  if (!fields) return null;
-
-  const result = new Date(from);
-  result.setSeconds(0);
-  result.setMilliseconds(0);
-
-  // Advance minute by minute until we find a match (max 1 year of iterations)
-  const maxIterations = 366 * 24 * 60;
-  for (let i = 0; i < maxIterations; i++) {
-    result.setMinutes(result.getMinutes() + 1);
-
-    if (matchesCronFields(result, fields)) {
-      return result;
-    }
-  }
-
-  return null;
-}
-
-function matchesCronFields(date: Date, fields: CronFields): boolean {
-  const minute = date.getMinutes();
-  const hour = date.getHours();
-  const day = date.getDate();
-  const month = date.getMonth() + 1; // JS months are 0-indexed
-  const weekday = date.getDay();
-
-  if (fields.minute !== null && !fields.minute.includes(minute)) return false;
-  if (fields.hour !== null && !fields.hour.includes(hour)) return false;
-  if (fields.month !== null && !fields.month.includes(month)) return false;
-
-  // Day and weekday: if both are restricted, match either
-  const dayRestricted = fields.day !== null && fields.day.length < 31;
-  const weekdayRestricted = fields.weekday !== null && fields.weekday.length < 7;
-
-  if (dayRestricted && weekdayRestricted) {
-    return fields.day.includes(day) || fields.weekday.includes(weekday);
-  }
-  if (dayRestricted && !fields.day.includes(day)) return false;
-  if (weekdayRestricted && !fields.weekday.includes(weekday)) return false;
-
-  return true;
-}
-
-// ============================================================================
-// Scheduler Runtime
-// ============================================================================
-
-export interface SchedulerConfig {
-  readonly checkIntervalMs?: number;
-  readonly maxConcurrentRuns?: number;
-}
-
 export class SchedulerRuntime {
-  private readonly db: Database.Database;
-  private readonly config: Required<SchedulerConfig>;
-  private intervalId: ReturnType<typeof setInterval> | null = null;
   private running = false;
-  private activeRuns = new Set<string>();
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private readonly intervalMs = 60000; // Check every minute
+  private readonly terminalManager: AgentTerminalRuntime;
 
-  constructor(db: Database.Database, config: SchedulerConfig = {}) {
-    this.db = db;
-    this.config = {
-      checkIntervalMs: config.checkIntervalMs ?? 60000, // Default: check every minute
-      maxConcurrentRuns: config.maxConcurrentRuns ?? 3,
-    };
+  constructor(
+    private readonly db: Database.Database,
+    options: { readonly terminalManager?: AgentTerminalRuntime; readonly cwd?: string } = {}
+  ) {
+    this.terminalManager = options.terminalManager ?? createSessionManager();
+    this.cwd = options.cwd ?? process.cwd();
   }
 
+  private readonly cwd: string;
+
+  /**
+   * Start the scheduler
+   */
   start(): void {
     if (this.running) return;
     this.running = true;
 
-    // Initial check
-    this.tick();
+    this.intervalId = setInterval(() => {
+      this.tick();
+    }, this.intervalMs);
 
-    // Schedule periodic checks
-    this.intervalId = setInterval(() => this.tick(), this.config.checkIntervalMs);
+    // Also run immediately on start
+    this.tick();
   }
 
+  /**
+   * Stop the scheduler
+   */
   stop(): void {
+    if (!this.running) return;
+    this.running = false;
+
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    this.running = false;
   }
 
-  private async tick(): Promise<void> {
-    if (!this.running) return;
+  /**
+   * Check if the scheduler is running
+   */
+  isRunning(): boolean {
+    return this.running;
+  }
 
-    try {
-      const dueAutomations = getDueAutomations(this.db);
+  /**
+   * Run a single tick - check for automations to execute
+   */
+  private tick(): void {
+    const automations = listAutomations(this.db);
+    const now = new Date();
 
-      for (const automation of dueAutomations) {
-        if (this.activeRuns.size >= this.config.maxConcurrentRuns) {
-          break;
-        }
+    for (const automation of automations) {
+      if (!automation.enabled) continue;
 
-        if (this.activeRuns.has(automation.id)) {
-          continue;
-        }
-
-        this.executeAutomation(automation);
+      const nextRun = getNextRunTime(automation.cronExpression, now);
+      if (nextRun && nextRun.getTime() <= now.getTime() + this.intervalMs) {
+        // Execute the automation
+        void this.triggerAutomation(automation.id);
       }
-    } catch (error) {
-      console.error('[Scheduler] Error checking due automations:', error);
     }
   }
 
-  private async executeAutomation(automation: Automation): Promise<void> {
-    this.activeRuns.add(automation.id);
-    const run = createAutomationRun(this.db, automation.id);
+  /**
+   * Trigger an automation immediately
+   */
+  async triggerAutomation(automationId: string): Promise<AutomationRun | null> {
+    const automations = listAutomations(this.db);
+    const automation = automations.find((a) => a.id === automationId);
+    if (!automation) return null;
+
+    const run = createAutomationRun(this.db, automationId);
+    const execution = this.createExecutionContext(automation);
 
     try {
       startAutomationRun(this.db, run.id);
+      if (execution.threadId) {
+        attachAutomationRunEvidence(this.db, run.id, { threadId: execution.threadId });
+      }
 
-      // Execute the command
-      const result = await this.executeCommand(automation.command);
+      const result = await this.runInTerminal(automation, run.id, execution);
+      if (result.exitCode !== 0) {
+        failAutomationRun(this.db, run.id, result.output, result.exitCode);
+        return getAutomationRunById(this.db, run.id);
+      }
 
       completeAutomationRun(this.db, run.id, {
         exitCode: result.exitCode,
         output: result.output,
       });
-
-      setAutomationLastRun(this.db, automation.id, new Date().toISOString());
-
-      // Calculate next run time
-      const nextRun = getNextRunTime(automation.cronExpression);
-      if (nextRun) {
-        setAutomationNextRun(this.db, automation.id, nextRun.toISOString());
-      }
+      return getAutomationRunById(this.db, run.id);
     } catch (error) {
-      failAutomationRun(this.db, run.id, error instanceof Error ? error.message : String(error));
-    } finally {
-      this.activeRuns.delete(automation.id);
+      failAutomationRun(this.db, run.id, String(error));
+      return getAutomationRunById(this.db, run.id);
     }
   }
 
-  private executeCommand(command: string): Promise<{ exitCode: number; output: string }> {
-    return new Promise((resolve) => {
-      const child = spawn(command, [], {
-        shell: true,
-        env: { ...process.env },
-      });
+  private createExecutionContext(automation: Automation): {
+    readonly cwd: string;
+    readonly threadId?: ThreadId;
+  } {
+    if (!automation.projectId) {
+      return { cwd: this.cwd };
+    }
 
-      let output = '';
-
-      child.stdout?.on('data', (data) => {
-        output += data.toString();
-      });
-
-      child.stderr?.on('data', (data) => {
-        output += data.toString();
-      });
-
-      child.on('close', (code) => {
-        resolve({
-          exitCode: code ?? 0,
-          output: output.slice(0, 10000), // Limit output to 10KB
-        });
-      });
-
-      child.on('error', (error) => {
-        resolve({
-          exitCode: 1,
-          output: `Error: ${error.message}`,
-        });
-      });
+    const project = getProject(this.db, automation.projectId as ProjectId);
+    const thread = createThread(
+      this.db,
+      project.id,
+      `Automation: ${automation.name}`,
+      automation.command,
+      { tags: ['automation'] }
+    );
+    recordEvent(this.db, thread.id, 'thread.created', {
+      threadId: thread.id,
+      projectId: thread.projectId,
+      title: thread.title,
+      goal: thread.metadata.goal,
     });
+    return { cwd: project.path, threadId: thread.id };
   }
 
-  /**
-   * Manually trigger an automation to run now.
-   */
-  async triggerAutomation(automationId: string): Promise<AutomationRun | null> {
-    const automation = getAutomationById(this.db, automationId);
-    if (!automation) return null;
+  private async runInTerminal(
+    automation: Automation,
+    runId: string,
+    execution: { readonly cwd: string; readonly threadId?: ThreadId }
+  ): Promise<{ readonly exitCode: number; readonly output: string }> {
+    const output: string[] = [];
+    const terminal = await this.terminalManager.launch({ cwd: execution.cwd });
+    const sessionId = terminal.sessionId as TerminalSessionId;
 
-    const run = createAutomationRun(this.db, automationId);
-    startAutomationRun(this.db, run.id);
+    if (execution.threadId) {
+      recordTerminalStarted(this.db, execution.threadId, {
+        sessionId,
+        runtime: 'pty',
+        workingDirectory: execution.cwd,
+        command: automation.command,
+        pid: terminal.pid,
+      });
+      attachAutomationRunEvidence(this.db, runId, { terminalSessionId: sessionId });
+    }
 
-    try {
-      const result = await this.executeCommand(automation.command);
-
-      // Use failAutomationRun for non-zero exit codes
-      if (result.exitCode !== 0) {
-        const failed = failAutomationRun(this.db, run.id, `Command exited with code ${result.exitCode}`, result.exitCode);
-        setAutomationLastRun(this.db, automationId, new Date().toISOString());
-        const nextRun = getNextRunTime(automation.cronExpression);
-        if (nextRun) {
-          setAutomationNextRun(this.db, automationId, nextRun.toISOString());
-        }
-        return failed;
+    const unsubscribeData = this.terminalManager.onData((emittedSessionId, data) => {
+      if (emittedSessionId !== terminal.sessionId) return;
+      output.push(data);
+      if (execution.threadId) {
+        appendTerminalChunk(this.db, execution.threadId, { sessionId, text: data });
       }
+    });
 
-      const completed = completeAutomationRun(this.db, run.id, {
-        exitCode: result.exitCode,
-        output: result.output,
+    const exitCode = await new Promise<number>((resolve) => {
+      const unsubscribeExit = this.terminalManager.onExit((emittedSessionId, code, signal) => {
+        if (emittedSessionId !== terminal.sessionId) return;
+        unsubscribeExit();
+        unsubscribeData();
+        if (execution.threadId) {
+          recordTerminalStopped(this.db, execution.threadId, {
+            sessionId,
+            exitCode: code,
+            ...(signal ? { signal } : {}),
+          });
+        }
+        resolve(code);
       });
 
-      setAutomationLastRun(this.db, automationId, new Date().toISOString());
-
-      const nextRun = getNextRunTime(automation.cronExpression);
-      if (nextRun) {
-        setAutomationNextRun(this.db, automationId, nextRun.toISOString());
+      const input = automationTerminalInput(automation.command);
+      if (execution.threadId) {
+        recordTerminalInput(this.db, execution.threadId, {
+          sessionId,
+          text: input,
+          source: 'doorway',
+        });
       }
+      this.terminalManager.sendInput(terminal.sessionId, input);
+    });
 
-      return completed;
-    } catch (error) {
-      return failAutomationRun(this.db, run.id, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  isRunning(): boolean {
-    return this.running;
+    return { exitCode, output: output.join('') };
   }
 }
 
-// ============================================================================
-// Validation Utility
-// ============================================================================
-
-export function isValidCronExpression(expression: string): boolean {
-  return parseCronExpression(expression) !== null;
-}
-
-export function describeCronExpression(expression: string): string | null {
-  const fields = parseCronExpression(expression);
-  if (!fields) return null;
-
-  const parts: string[] = [];
-
-  if (fields.minute) {
-    parts.push(`minutes: ${describeField(fields.minute)}`);
-  }
-  if (fields.hour) {
-    parts.push(`hours: ${describeField(fields.hour)}`);
-  }
-  if (fields.day) {
-    parts.push(`days: ${describeField(fields.day)}`);
-  }
-  if (fields.month) {
-    parts.push(`months: ${describeField(fields.month)}`);
-  }
-  if (fields.weekday !== null) {
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const days = fields.weekday.map(d => dayNames[d]).join(', ');
-    parts.push(`weekdays: ${days}`);
-  }
-
-  return parts.join(', ');
-}
-
-function describeField(values: number[]): string {
-  if (values.length === 0) return 'none';
-
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min;
-
-  if (range === values.length - 1 && values.every((v, i) => v === min + i)) {
-    return `${min}-${max}`;
-  }
-
-  if (values.length <= 5) {
-    return values.join(', ');
-  }
-
-  return `${values.length} values`;
+export function automationTerminalInput(command: string): string {
+  const exitCommand = process.platform === 'win32' ? 'exit $LASTEXITCODE' : 'exit $?';
+  return `${command}\n${exitCommand}\n`;
 }

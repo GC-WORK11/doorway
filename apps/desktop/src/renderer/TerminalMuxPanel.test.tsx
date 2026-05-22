@@ -83,6 +83,7 @@ describe('terminalMuxMetadata', () => {
       runtime: 'pty',
       status: 'running',
       workingDirectory: '/repo',
+      createdAt: new Date('2026-05-20T01:00:00.000Z'),
     };
 
     const metadata = terminalMuxMetadata({
@@ -123,6 +124,7 @@ describe('terminalProcessEvidenceRows', () => {
       runtime: 'pty',
       status: 'running',
       workingDirectory: '/repo',
+      createdAt: new Date('2026-05-20T01:00:00.000Z'),
     };
 
     expect(terminalProcessEvidenceRows(minimalSession)).toEqual([]);
@@ -148,6 +150,7 @@ describe('terminalFileEvidenceRows', () => {
       runtime: 'pty',
       status: 'running',
       workingDirectory: '/repo',
+      createdAt: new Date('2026-05-20T01:00:00.000Z'),
     };
 
     expect(terminalFileEvidenceRows(minimalSession)).toEqual([]);
@@ -160,6 +163,7 @@ function terminalProjection(): TerminalProjection {
     runtime: 'pty',
     status: 'running',
     workingDirectory: '/repo',
+    createdAt: new Date('2026-05-20T01:00:00.000Z'),
     command: 'bash',
     pid: 4242,
     exitCode: 127,

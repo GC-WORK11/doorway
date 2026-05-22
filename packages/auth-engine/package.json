@@ -1,0 +1,9 @@
+{
+  "name": "@doorway/auth-engine",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@doorway/core": "workspace:*",
+    "@doorway/protocol": "workspace:*"
+  }
+}
