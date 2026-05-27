@@ -72,8 +72,6 @@ describe('CodexCliAdapter', () => {
       '/repo',
       '--model',
       'gpt-5.2',
-      '--',
-      'Review the task',
     ]);
     expect(spec.cwd).toBe('/repo');
   });
@@ -91,7 +89,7 @@ describe('ClaudeCodeAdapter', () => {
     expect(adapter.provider).toBe('claude');
     expect(adapter.manifest.id).toBe('claude-code-cli');
     expect(spec.command).toBe('claude-test');
-    expect(spec.args).toEqual(['--model', 'claude-sonnet-4-6', 'Implement the task']);
+    expect(spec.args).toEqual(['--resume', '--model', 'claude-sonnet-4-6']);
     expect(spec.args).not.toContain('--print');
     expect(spec.args).not.toContain('--no-input');
     expect(spec.cwd).toBe('/repo');

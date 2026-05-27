@@ -11,7 +11,11 @@ export interface CompilerContext {
   readonly importantFiles?: readonly string[];
   readonly previousSummary?: string;
   readonly memoryLoader?: ProjectMemoryLoader;
-  readonly peerAgents?: readonly { readonly id: string; readonly role: string; readonly displayName: string; }[];
+  readonly peerAgents?: readonly {
+    readonly id: string;
+    readonly role: string;
+    readonly displayName: string;
+  }[];
 }
 
 export function relevantFileContentForPrompt(content: string): string {

@@ -21,12 +21,9 @@ function assert(condition, message) {
 async function assertDrawerLayout(page, drawer, label) {
   const drawerBox = await drawer.boundingBox();
   const sidebarBox = await page.locator('.main-sidebar').boundingBox();
-  const railBox = await page.locator('.utility-rail').boundingBox();
   assert(drawerBox, `${label} drawer has no layout box`);
   assert(sidebarBox, 'main sidebar has no layout box');
-  assert(railBox, 'utility rail has no layout box');
   assert(drawerBox.x >= sidebarBox.x + sidebarBox.width, `${label} drawer overlaps sidebar`);
-  assert(drawerBox.x >= railBox.x + railBox.width, `${label} drawer overlaps utility rail`);
   assert(drawerBox.x + drawerBox.width <= 1440, `${label} drawer escapes viewport width`);
   assert(
     drawerBox.y >= 0 && drawerBox.y + drawerBox.height <= 1000,
@@ -41,6 +38,9 @@ const browser = await chromium.launch({
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  page.on('pageerror', (error) => {
+    console.error(`pageerror=${error.message}`);
+  });
   if (stateMode === 'populated') {
     await page.addInitScript(() => {
       const project = {
@@ -219,6 +219,8 @@ try {
         },
       ];
       const smokeState = {
+        agentLaunches: [],
+        bestOfNLaunches: [],
         terminalWrites: [],
         terminalResizes: [],
         terminalStops: [],
@@ -561,12 +563,18 @@ try {
         createHandoff: async () => undefined,
         copyText: async () => ({ copied: true }),
         openPath: async () => ({ opened: true }),
-        launchAgent: async () => ({
-          runId: 'run_seeded',
-          sessionId: 'session_seeded',
-          threadId: thread.id,
-        }),
-        launchBestOfN: async () => ({ runIds: ['run_seeded'], threadId: thread.id }),
+        launchAgent: async (req) => {
+          smokeState.agentLaunches.push(req);
+          return {
+            runId: 'run_seeded',
+            sessionId: 'session_seeded',
+            threadId: thread.id,
+          };
+        },
+        launchBestOfN: async (req) => {
+          smokeState.bestOfNLaunches.push(req);
+          return { runIds: ['run_seeded', 'run_review'], threadId: thread.id };
+        },
         interruptAgent: async () => undefined,
         terminateAgent: async () => undefined,
         createTerminal: async () => ({ sessionId: 'session_seeded' }),
@@ -675,6 +683,7 @@ try {
     await page.getByText('Doorway session activity').waitFor({ state: 'visible', timeout: 5000 });
     await page
       .getByText('Verify populated smoke orchestration lane')
+      .first()
       .waitFor({ state: 'visible', timeout: 5000 });
     const canvasText = await page.locator('.thread-canvas').innerText();
     assert(canvasText.includes('Recorded'), 'recorded orchestration status did not render');
@@ -703,7 +712,7 @@ try {
     );
     assert(
       permissionIpc.terminalWrites.some(
-        (entry) => entry.sessionId === 'session_approval' && entry.data === 'n\n'
+        (entry) => entry.sessionId === 'session_approval' && (entry.data === 'n\n' || entry.data === 'n\r')
       ),
       'live permission denial did not send terminal input'
     );
@@ -761,23 +770,24 @@ try {
     assert(evidenceText.includes('Unit tests'), 'test proof did not render');
     assert(evidenceText.includes('Thread event JSONL'), 'replay JSONL card did not render');
     await assertDrawerLayout(page, evidenceDrawer, 'evidence');
-    await page.locator('.utility-rail').getByRole('button', { name: 'Worktrees' }).click();
-    const drawer = page.getByRole('complementary', { name: 'Worktrees' });
-    await drawer.waitFor({ state: 'visible', timeout: 5000 });
-    const worktreeRow = page.getByRole('button', {
-      name: /refs\/heads\/doorway\/task-review\/backend/,
+
+    await page
+      .getByRole('textbox', { name: 'Prompt' })
+      .fill('@Claude implement and @Codex verify the smoke task');
+    await page.getByRole('button', { name: 'Send prompt' }).click();
+    await page.waitForFunction(() => window.__doorwaySmoke?.bestOfNLaunches?.length > 0, null, {
+      timeout: 5000,
     });
-    await worktreeRow.click();
-    await page.getByText('Selected diff').waitFor({ state: 'visible', timeout: 5000 });
-    await drawer.getByLabel('Readiness actions').waitFor({ state: 'visible', timeout: 5000 });
-    await drawer.getByLabel('Branch safety actions').waitFor({ state: 'visible', timeout: 5000 });
-    await drawer
-      .getByLabel('Evidence handoff actions')
-      .waitFor({ state: 'visible', timeout: 5000 });
-    await assertDrawerLayout(page, drawer, 'worktree');
-    await drawer.getByRole('button', { name: 'Close surface' }).click();
+    const delegationIpc = await page.evaluate(() => window.__doorwaySmoke);
+    assert(
+      delegationIpc.bestOfNLaunches[0].providers.join(',') === 'claude,codex',
+      'multi-worker mentions did not launch Claude and Codex through Best-of-N'
+    );
     await page.getByRole('textbox', { name: 'Prompt' }).fill('Run the smoke verification task');
     await page.getByRole('button', { name: 'Send prompt' }).click();
+    await page.waitForFunction(() => window.__doorwaySmoke?.agentLaunches?.length > 0, null, {
+      timeout: 5000,
+    });
     const terminalPanel = page.getByLabel('Terminal mux');
     await terminalPanel.waitFor({ state: 'visible', timeout: 5000 });
     await terminalPanel

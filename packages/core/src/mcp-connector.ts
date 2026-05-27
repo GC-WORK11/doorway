@@ -97,16 +97,16 @@ export interface McpServerInfo {
 // ============================================================================
 
 export interface McpConnectorEvents {
-  'connected': () => void;
-  'disconnected': () => void;
-  'error': (error: Error) => void;
+  connected: () => void;
+  disconnected: () => void;
+  error: (error: Error) => void;
   'tool:added': (tool: McpTool) => void;
   'tool:removed': (name: string) => void;
   'resource:added': (resource: McpResource) => void;
   'resource:removed': (uri: string) => void;
   'prompt:added': (prompt: McpPrompt) => void;
   'prompt:removed': (name: string) => void;
-  'notification': (notification: McpNotification) => void;
+  notification: (notification: McpNotification) => void;
 }
 
 // ============================================================================
@@ -198,10 +198,13 @@ export class McpConnector extends EventEmitter {
   private socket: Socket | null = null;
   private connected = false;
   private requestId = 0;
-  private pendingRequests = new Map<number | string, {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-  }>();
+  private pendingRequests = new Map<
+    number | string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+    }
+  >();
   private readonly tools = new Map<string, McpTool>();
   private readonly resources = new Map<string, McpResource>();
   private readonly prompts = new Map<string, McpPrompt>();
@@ -288,7 +291,9 @@ export class McpConnector extends EventEmitter {
     let buffer = '';
     this.process.stdout?.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
-      this.processBuffer(buffer, (remaining) => { buffer = remaining; });
+      this.processBuffer(buffer, (remaining) => {
+        buffer = remaining;
+      });
     });
 
     this.process.stderr?.on('data', (chunk: Buffer) => {
@@ -377,7 +382,9 @@ export class McpConnector extends EventEmitter {
 
     // Reject any pending requests
     for (const [id, pending] of this.pendingRequests) {
-      pending.reject(new Error(`MCP server ${this.server.name} disconnected (code=${code}, signal=${signal})`));
+      pending.reject(
+        new Error(`MCP server ${this.server.name} disconnected (code=${code}, signal=${signal})`)
+      );
     }
     this.pendingRequests.clear();
   }
@@ -440,11 +447,7 @@ export class McpConnector extends EventEmitter {
     });
 
     // Load initial lists
-    await Promise.all([
-      this.refreshTools(),
-      this.refreshResources(),
-      this.refreshPrompts(),
-    ]);
+    await Promise.all([this.refreshTools(), this.refreshResources(), this.refreshPrompts()]);
   }
 
   async disconnect(): Promise<void> {
@@ -601,9 +604,7 @@ export class McpConnectionManager extends EventEmitter {
   }
 
   async connectAll(timeoutMs?: number): Promise<void> {
-    await Promise.all(
-      this.serverConfigs.map((server) => this.connectServer(server, timeoutMs))
-    );
+    await Promise.all(this.serverConfigs.map((server) => this.connectServer(server, timeoutMs)));
   }
 
   async connectServer(server: McpServerConfig, timeoutMs?: number): Promise<McpConnector> {
@@ -643,9 +644,7 @@ export class McpConnectionManager extends EventEmitter {
   }
 
   async disconnectAll(): Promise<void> {
-    await Promise.all(
-      Array.from(this.connections.keys()).map((id) => this.disconnectServer(id))
-    );
+    await Promise.all(Array.from(this.connections.keys()).map((id) => this.disconnectServer(id)));
   }
 
   getConnector(serverId: string): McpConnector | undefined {

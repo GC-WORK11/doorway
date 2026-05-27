@@ -6,6 +6,9 @@ import {
   isTerminalSessionId,
   isWorktreeId,
   isEventId,
+  TERMINAL_ENTER,
+  terminalSubmitInput,
+  terminalSubmitLines,
 } from './index.js';
 import type {
   AdapterId,
@@ -102,6 +105,15 @@ describe('Protocol Type Guards', () => {
       expect(isEventId('thread_abc123')).toBe(false);
       expect(isEventId('msg_abc123')).toBe(false);
     });
+  });
+});
+
+describe('terminal submit helpers', () => {
+  it('uses carriage return for interactive terminal submission', () => {
+    expect(TERMINAL_ENTER).toBe('\r');
+    expect(terminalSubmitInput('yes')).toBe('yes\r');
+    expect(terminalSubmitInput('')).toBe('\r');
+    expect(terminalSubmitLines(['pnpm test', 'exit $?'])).toBe('pnpm test\rexit $?\r');
   });
 });
 

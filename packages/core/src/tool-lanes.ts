@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { terminalSubmitInput } from '@doorway/protocol';
 import type {
   AdapterId,
   AgentAttentionState,
@@ -57,7 +58,7 @@ export function listToolLaneProjections(
           ORDER BY events.sequence DESC
           LIMIT 1
         ) AS latest_attention_at,
-        terminal_chunks.text AS latest_output,
+        COALESCE(terminal_chunks.clean_text, terminal_chunks.text) AS latest_output,
         terminal_chunks.created_at AS latest_output_at,
         terminal_inputs.text AS latest_input,
         terminal_inputs.created_at AS latest_input_at
@@ -135,7 +136,7 @@ export function findReusableToolLane(
 
 export function followUpTerminalInput(prompt: string): string {
   const trimmed = prompt.trim();
-  return trimmed ? `${trimmed}\n` : '\n';
+  return terminalSubmitInput(trimmed);
 }
 
 function adapterIdForProvider(provider: string | undefined): AdapterId {

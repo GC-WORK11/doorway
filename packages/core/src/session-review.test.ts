@@ -220,7 +220,7 @@ describe('SessionReviewService', () => {
       });
 
       const suggestions = service.getSuggestions();
-      const transientSuggestion = suggestions.find(s => s.includes('transient'));
+      const transientSuggestion = suggestions.find((s) => s.includes('transient'));
       expect(transientSuggestion).toBeDefined();
     });
 
@@ -249,7 +249,7 @@ describe('SessionReviewService', () => {
       });
 
       const suggestions = service.getSuggestions();
-      const permanentSuggestion = suggestions.find(s => s.includes('permanent'));
+      const permanentSuggestion = suggestions.find((s) => s.includes('permanent'));
       expect(permanentSuggestion).toBeDefined();
     });
 

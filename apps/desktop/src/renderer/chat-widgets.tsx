@@ -44,6 +44,7 @@ import {
   peerMessageRouteLabel,
   latestTaskGraphs,
 } from './App';
+import { useHarnessState } from './HarnessContext';
 
 export function SessionActivityCapsule({
   agentEvents,
@@ -52,6 +53,14 @@ export function SessionActivityCapsule({
   readonly agentEvents: readonly LiveAgentEvent[];
   readonly threadEvents: readonly DoorwayEvent[];
 }) {
+  let setActiveSurface: any = undefined;
+  try {
+    const context = useHarnessState();
+    setActiveSurface = context.setActiveSurface;
+  } catch {
+    // Safe fallback for isolated unit tests
+  }
+
   if (agentEvents.length === 0 && threadEvents.length === 0) {
     return null;
   }
@@ -64,11 +73,35 @@ export function SessionActivityCapsule({
       <div className="message-meta">Doorway</div>
       <p>Current session evidence is attached to this thread.</p>
       <div className="orchestration-capsule">
-        <div className="orchestration-header">
+        <div className="orchestration-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Doorway session activity</span>
-          <span className="orchestration-status">
-            {agentEvents.length > 0 ? 'Live' : 'Recorded'}
-          </span>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button 
+              type="button" 
+              onClick={() => setActiveSurface?.('terminal')}
+              style={{
+                background: 'rgba(0,0,0,0.05)',
+                border: 'none',
+                padding: '4px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                color: '#111',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+              </svg>
+              Open CLI
+            </button>
+            <span className="orchestration-status">
+              {agentEvents.length > 0 ? 'Live' : 'Recorded'}
+            </span>
+          </div>
         </div>
         {launchOptions && (
           <div className="orchestration-pills" aria-label="Launch options">
@@ -485,6 +518,64 @@ export function ApprovalHistoryCapsule({
             {receipt.userNotes && <small>{receipt.userNotes}</small>}
           </div>
         ))}
+      </div>
+    </article>
+  );
+}
+
+export function ResultCard({
+  synthesis,
+}: {
+  readonly synthesis: import('@doorway/protocol').UnifiedThreadSynthesisCreatedPayload;
+}) {
+  if (!synthesis) return null;
+
+  return (
+    <article className="message-capsule message-capsule--doorway message-capsule--result">
+      <div className="message-meta">Agent Response Synthesis</div>
+      <div className="result-card" aria-label="Result summary">
+        <div className="result-card__header">
+          <strong>Task Completed</strong>
+          <span className="result-card__badge">{synthesis.agentCount} agent(s)</span>
+        </div>
+        <div className="result-card__body markdown-body">
+          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: 'transparent', border: 'none', padding: 0, margin: 0 }}>
+            {synthesis.summary}
+          </pre>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export function PlanCard({
+  graph,
+}: {
+  readonly graph: import('@doorway/protocol').TaskGraphProjection;
+}) {
+  if (!graph || graph.nodes.length === 0) return null;
+  const completed = graph.nodes.filter((n) => n.status === 'completed').length;
+  const total = graph.nodes.length;
+
+  return (
+    <article className="message-capsule message-capsule--doorway message-capsule--plan">
+      <div className="message-meta">Execution Plan</div>
+      <div className="plan-card" aria-label="Execution plan">
+        <div className="plan-card__header">
+          <strong>{graph.goal}</strong>
+          <span>{completed} / {total} tasks completed</span>
+        </div>
+        <div className="plan-card__nodes">
+          {graph.nodes.map((node, i) => (
+            <div className="plan-node" data-status={node.status} key={node.id}>
+              <div className="plan-node__indicator" />
+              <div className="plan-node__content">
+                <strong>Step {i + 1}: {node.role}</strong>
+                <small>{node.acceptanceCriteria || 'Execute task'}</small>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </article>
   );

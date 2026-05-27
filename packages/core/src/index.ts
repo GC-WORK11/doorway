@@ -28,3 +28,8 @@ export * from './id-gen.js';
 export * from './errors.js';
 export * from './automation-service.js';
 export * from './plugin-manifest.js';
+export { McpConnector, McpConnectionManager } from './mcp-connector.js';
+export * from './fault-recovery.js';
+export * from './clarification-handler.js';
+export * from './unified-thread-service.js';
+export * from './self-adaptation-service.js';

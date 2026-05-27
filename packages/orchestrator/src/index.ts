@@ -15,9 +15,14 @@ import {
   claimTaskGraphNodeForRun,
   completeTaskGraphNodeForRun,
   generateId,
+  recordEvent,
+  recordProcessSnapshot,
+  recordProcessSnapshotFailed,
   recordTerminalInput,
+  recordTerminalStateDetection,
   recordTerminalStarted,
   recordTerminalStopped,
+  redactTerminalText,
   registerMeshAgent,
   routeTerminalActionBlocks,
   upsertAgentRunLaunch,
@@ -27,27 +32,53 @@ import { BrainService } from './brain/brain-service.js';
 import { BrowserSessionService } from './browser-session.js';
 import { FlightRecorderService } from './flight-recorder.js';
 import { PeerProtocolService } from './peer-protocol.js';
+import {
+  createPeerOrchestration,
+  PeerOrchestrationService,
+  type AgentCapabilityTag,
+  type AgentProfile,
+  type TaskAssignment,
+  type TaskLane,
+  type SynthesisCard,
+} from './peer-orchestration.js';
+import { getFaultRecoveryService } from '@doorway/core';
 import { type VaultProvider } from './brain/types.js';
-import { createSessionManager } from '@doorway/terminal-runtime';
+import { captureProcessTree, createSessionManager, type ProcessTreeCapture } from '@doorway/terminal-runtime';
 import {
   AutoCompactor,
   createAutoCompactorIntegration,
   type AutoCompactorConfig,
 } from './auto-compactor.js';
+import { terminalSubmitInput } from '@doorway/protocol';
 import type {
   AgentRunId,
   AgentLaunchOptions,
   DoorwayMessage,
   MeshAgentKind,
+  ProcessSnapshotPhase,
   TaskId,
+  TerminalControlEvent,
+  TerminalScreenSnapshot,
+  TerminalStateDetection,
   TerminalSessionId,
   ThreadId,
   WorktreeId,
 } from '@doorway/protocol';
+import {
+  ClarificationHandler,
+  ClarificationRequest,
+} from '@doorway/core';
+import { FollowUpEngine } from './follow-up.js';
 
 // ============================================================================
 // Orchestrator Types
 // ============================================================================
+
+/**
+ * Callback to broadcast clarification requests to the renderer.
+ */
+export type ClarificationBroadcast = (request: ClarificationRequest) => void;
+export type ProcessSnapshotter = (rootPid: number) => Promise<ProcessTreeCapture>;
 
 export interface WorktreeCreator {
   createWorktree(options: {
@@ -65,6 +96,9 @@ export interface OrchestratorConfig {
   defaultProvider?: string;
   worktreeManager?: WorktreeCreator;
   terminalManager?: AgentTerminalRuntime;
+  processSnapshotter?: ProcessSnapshotter | false;
+  /** Callback to broadcast clarification requests to the renderer via terminalStreamHub */
+  onClarificationBroadcast?: ClarificationBroadcast;
 }
 
 export interface AgentEvent {
@@ -85,12 +119,21 @@ export interface LaunchSpec {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: Record<string, string>;
+  readonly stdinPrompt?: string;
 }
 
 export interface TerminalLaunchResult {
   readonly sessionId: string;
   readonly pid: number;
   readonly startedAt: Date;
+}
+
+export interface TerminalDecodedData {
+  readonly text: string;
+  readonly rawText: string;
+  readonly controlEvents: readonly TerminalControlEvent[];
+  readonly screenSnapshot: TerminalScreenSnapshot;
+  readonly stateDetection: TerminalStateDetection;
 }
 
 export interface AgentTerminalRuntime {
@@ -102,9 +145,14 @@ export interface AgentTerminalRuntime {
   ): Promise<TerminalLaunchResult>;
   sendInput(sessionId: string, data: string): void;
   stop(sessionId: string, signal?: number): number;
-  onData(callback: (sessionId: string, data: string) => void): () => void;
+  onData(
+    callback: (sessionId: string, data: string, decodedChunk?: TerminalDecodedData) => void
+  ): () => void;
   onExit(
     callback: (sessionId: string, exitCode: number, signal: string | null) => void
+  ): () => void;
+  onStateChange?(
+    callback: (sessionId: string, detection: TerminalStateDetection) => void
   ): () => void;
 }
 
@@ -161,6 +209,9 @@ export * from './compaction.js';
 export * from './auto-compactor.js';
 export * from './scheduler.js';
 export * from './cron.js';
+export * from './event-trigger.js';
+export * from './peer-protocol.js';
+export * from './peer-orchestration.js';
 
 // ============================================================================
 // Orchestrator
@@ -173,6 +224,7 @@ export class Orchestrator {
   private readonly adapters: Map<string, IAgentAdapter> = new Map();
   private readonly activeRuns: Map<string, OrchestratorRun> = new Map();
   private readonly lastHandoffs: Map<string, HandoffPacket> = new Map(); // threadId -> HandoffPacket
+  private readonly faultRecovery = getFaultRecoveryService();
 
   readonly taskGraph: TaskGraphService;
   readonly memory: ProjectMemoryLoader;
@@ -183,7 +235,11 @@ export class Orchestrator {
   readonly brain: BrainService;
   readonly autoCompactor: AutoCompactor;
   readonly peerProtocol: PeerProtocolService;
+  readonly peerOrchestration: PeerOrchestrationService;
+  readonly followUp: FollowUpEngine;
   private readonly autoCompactorIntegration: ReturnType<typeof createAutoCompactorIntegration>;
+  readonly clarificationHandler: ClarificationHandler;
+  private readonly processSnapshotter: ProcessSnapshotter | null;
 
   constructor(
     db: Database.Database,
@@ -194,6 +250,8 @@ export class Orchestrator {
     this.config = config;
     this.db = db;
     this.terminalManager = config.terminalManager ?? createSessionManager();
+    this.processSnapshotter =
+      config.processSnapshotter === false ? null : (config.processSnapshotter ?? captureProcessTree);
     this.taskGraph = new TaskGraphService(db);
     this.memory = new ProjectMemoryLoader(db);
     this.handoff = new HandoffPacketService(db);
@@ -202,10 +260,20 @@ export class Orchestrator {
     this.recorder = new FlightRecorderService(db);
     this.brain = new BrainService(db, vault);
     this.peerProtocol = new PeerProtocolService(db);
+    this.peerOrchestration = createPeerOrchestration(db, this.peerProtocol);
+    this.followUp = new FollowUpEngine(this.brain);
 
     // Initialize auto-compactor
     this.autoCompactor = new AutoCompactor(db, autoCompactorConfig ?? { threshold: 0.8 });
     this.autoCompactorIntegration = createAutoCompactorIntegration(this.autoCompactor);
+
+    // Initialize clarification handler
+    this.clarificationHandler = new ClarificationHandler({
+      onClarificationDetected: (request) => {
+        // Forward to renderer via terminalStreamHub if configured
+        this.config.onClarificationBroadcast?.(request);
+      },
+    });
   }
 
   registerAdapter(adapter: IAgentAdapter): void {
@@ -225,7 +293,11 @@ export class Orchestrator {
     prompt: string,
     providers: string[],
     importantFiles?: readonly string[],
-    executionOptions?: { readonly projectPath?: string; readonly useWorktree?: boolean }
+    executionOptions?: {
+      readonly projectPath?: string;
+      readonly useWorktree?: boolean;
+      readonly launchOptions?: AgentLaunchOptions;
+    }
   ): Promise<string[]> {
     if (providers.length > 2) {
       throw new Error('V1 limits Best-of-N to a maximum of 2 parallel agents.');
@@ -307,6 +379,9 @@ export class Orchestrator {
         prompt: finalPrompt,
         cwd: executionCwd,
         worktreeId,
+        ...(executionOptions?.launchOptions
+          ? { launchOptions: executionOptions.launchOptions }
+          : {}),
       };
 
       this.activeRuns.set(runId, run);
@@ -316,7 +391,12 @@ export class Orchestrator {
         const result = await this.launchAdapterInTerminal(adapter, run, {
           prompt: finalPrompt,
           cwd: executionCwd,
-          env: envOverrides as unknown as Record<string, string>,
+          env: {
+            ...(envOverrides as unknown as Record<string, string>),
+            ...(executionOptions?.launchOptions?.modelId
+              ? { DOORWAY_MODEL_ID: executionOptions.launchOptions.modelId }
+              : {}),
+          },
         });
       } catch (error) {
         run.status = 'failed';
@@ -455,6 +535,30 @@ export class Orchestrator {
     const run = this.activeRuns.get(runId);
     if (!run) return;
 
+    // Follow-up audit and synthesis
+    const audit = await this.followUp.auditCompletion(run.prompt, run.events, run.provider);
+    const synthesis = await this.followUp.synthesizeResponse(run.prompt, audit);
+
+    recordEvent(this.db, run.threadId, 'unified_thread.synthesis_created', {
+      sessionId: run.sessionId ?? 'unknown',
+      summary: synthesis,
+      agentCount: 1,
+    });
+
+    // Notify peer orchestration of agent completion before terminating
+    if (run.meshAgentId) {
+      const durationMs = run.endTime
+        ? run.endTime.getTime() - run.startTime.getTime()
+        : undefined;
+      this.peerOrchestration.onAgentCompletion({
+        agentId: run.meshAgentId,
+        threadId: run.threadId as string,
+        summary: `Agent finished by orchestrator`,
+        changedFiles: options?.changedFiles,
+        durationMs,
+      });
+    }
+
     const packet = await this.handoff.createPacket({
       threadId: run.threadId,
       runId: run.id,
@@ -475,6 +579,14 @@ export class Orchestrator {
     if (run.sessionId) {
       this.terminalManager.stop(run.sessionId, 2);
     }
+    // Notify peer orchestration of agent interruption
+    if (run.meshAgentId) {
+      this.peerOrchestration.onAgentBlocker({
+        agentId: run.meshAgentId,
+        threadId: run.threadId as string,
+        reason: 'Agent interrupted by user',
+      });
+    }
     run.status = 'interrupted';
   }
 
@@ -485,6 +597,7 @@ export class Orchestrator {
       this.terminalManager.stop(run.sessionId, 15);
     }
     run.unsubscribe?.();
+    run.stateUnsubscribe?.();
     run.exitUnsubscribe?.();
     run.status = 'terminated';
     this.activeRuns.delete(runId);
@@ -529,25 +642,97 @@ export class Orchestrator {
       command: shellCommand,
       pid: result.pid,
     });
-
     run.sessionId = sessionId;
+    await this.captureProcessSnapshot(run.threadId, sessionId, result.pid, 'started');
+
     this.registerMeshAgentForRun(adapter, run);
 
-    run.unsubscribe = this.terminalManager.onData((sessionId, data) => {
+    // Register with FaultRecoveryService for monitoring
+    this.faultRecovery.registerProcess({
+      sessionId: run.sessionId,
+      runId: run.id as import('@doorway/protocol').AgentRunId,
+      threadId: run.threadId,
+      provider: adapter.provider,
+      startedAt: run.startTime,
+      lastHeartbeat: new Date(),
+      status: 'running',
+    });
+
+    // Notify peer orchestration of agent start
+    if (run.meshAgentId) {
+      this.peerOrchestration.onAgentStart({
+        agentId: run.meshAgentId,
+        threadId: run.threadId as string,
+        displayName: adapter.name,
+        kind: meshAgentKindForRun(adapter.provider),
+        provider: adapter.provider,
+        role: meshAgentKindForRun(adapter.provider) === 'reviewer' ? 'reviewer' : 'implementer',
+        currentTask: run.prompt.slice(0, 100),
+      });
+    }
+
+    run.unsubscribe = this.terminalManager.onData((sessionId, data, decodedChunk) => {
       if (sessionId !== result.sessionId) return;
+      const semanticText = decodedChunk?.text ?? data;
+
       const chunk = appendTerminalChunk(this.db, run.threadId, {
         sessionId: result.sessionId as TerminalSessionId,
         text: data,
+        cleanText: semanticText,
+        controlEvents: decodedChunk?.controlEvents,
+        screenSnapshot: decodedChunk?.screenSnapshot,
+        stateDetection: decodedChunk?.stateDetection,
       });
+
+      // Check if run is paused for clarification - if so, persist output but don't auto-respond.
+      if (run.isPausedForClarification) {
+        run.events.push({
+          type: 'stdout',
+          data,
+          timestamp: new Date(),
+        });
+        return;
+      }
+
+      // Check for clarification requests in the output
+      const clarificationRequest = this.clarificationHandler.processOutput(
+        run.sessionId!,
+        run.id as AgentRunId,
+        run.threadId,
+        semanticText
+      );
+
+      if (clarificationRequest) {
+        // Pause the agent for clarification
+        run.isPausedForClarification = true;
+        run.clarificationRequestId = clarificationRequest.id;
+        recordEvent(this.db, run.threadId, 'clarification.requested', {
+          clarificationId: clarificationRequest.id,
+          threadId: run.threadId,
+          runId: run.id as AgentRunId,
+          sessionId: result.sessionId as TerminalSessionId,
+          question: clarificationRequest.question,
+          context: clarificationRequest.context,
+          suggestedResponses: clarificationRequest.suggestedResponses,
+          requestedAt: clarificationRequest.timestamp.toISOString(),
+        });
+        run.events.push({
+          type: 'stdout',
+          data,
+          timestamp: new Date(),
+        });
+        return;
+      }
+
       const actionResults = routeTerminalActionBlocks(this.db, {
         threadId: run.threadId,
         terminalSessionId: result.sessionId as TerminalSessionId,
         chunkSequence: chunk.sequence,
-        text: data,
+        text: semanticText,
       });
       for (const actionResult of actionResults) {
         if (actionResult.terminalResponseText) {
-          const responseInput = `${actionResult.terminalResponseText}\n`;
+          const responseInput = terminalSubmitInput(actionResult.terminalResponseText);
           recordTerminalInput(this.db, run.threadId, {
             sessionId: result.sessionId as TerminalSessionId,
             text: responseInput,
@@ -563,52 +748,180 @@ export class Orchestrator {
       });
     });
 
-    run.exitUnsubscribe = this.terminalManager.onExit((sessionId, exitCode, signal) => {
+    run.stateUnsubscribe = this.terminalManager.onStateChange?.((sessionId, detection) => {
       if (sessionId !== result.sessionId) return;
+      recordTerminalStateDetection(this.db, run.threadId, {
+        sessionId: result.sessionId as TerminalSessionId,
+        detection,
+        source: 'silence_confirmation',
+      });
+    });
+
+    run.exitUnsubscribe = this.terminalManager.onExit(async (sessionId, exitCode, signal) => {
+      if (sessionId !== result.sessionId) return;
+      const exitedAt = new Date();
+      run.endTime = exitedAt;
+      run.events.push({
+        type: 'exit',
+        data: signal ? `${exitCode} ${signal}` : String(exitCode),
+        timestamp: exitedAt,
+      });
       recordTerminalStopped(this.db, run.threadId, {
         sessionId: result.sessionId as TerminalSessionId,
         exitCode,
         signal: signal ?? undefined,
       });
+      await this.captureProcessSnapshot(
+        run.threadId,
+        result.sessionId as TerminalSessionId,
+        result.pid,
+        'stopped'
+      );
 
-      const { classifyTerminalExit } = require('@doorway/terminal-runtime');
-      const exitClassification = classifyTerminalExit({ exitCode, signal });
+      // Unregister from FaultRecoveryService
+      this.faultRecovery.unregisterProcess(sessionId as TerminalSessionId);
 
-      const isRecoverableFault =
-        exitClassification.kind === 'killed' ||
-        exitClassification.kind === 'segmentation_fault' ||
-        exitClassification.kind === 'general_error';
+      // Get the running process info for fault recovery
+      const processInfo = {
+        sessionId: sessionId as TerminalSessionId,
+        runId: run.id as AgentRunId,
+        threadId: run.threadId,
+        provider: run.provider,
+        startedAt: run.startTime,
+        lastHeartbeat: new Date(),
+        status: 'crashed' as const,
+        exitCode,
+        signal: signal ?? undefined,
+      };
 
-      if (isRecoverableFault && (run.retryCount ?? 0) < 2) {
-        console.warn(
-          `[FaultRecovery] Session ${sessionId} crashed (${exitClassification.label}). Initiating auto-recovery respawn...`
-        );
-        run.retryCount = (run.retryCount ?? 0) + 1;
-        run.status = 'launching';
+      // Use FaultRecoveryService to detect fault and determine recovery action
+      const fault = this.faultRecovery.detectFaultFromExit(exitCode, signal ?? undefined);
+      console.log(`[FaultRecovery] Detected fault: ${fault.faultType} (${fault.severity}) - ${fault.reason}`);
+
+      const action = this.faultRecovery.determineRecoveryAction(fault, processInfo);
+      console.log(`[FaultRecovery] Recovery action: ${action.type} - ${action.reason}`);
+
+      // Execute the recovery action
+      const shouldRetry = await this.faultRecovery.executeRecovery(action, processInfo);
+
+      if (shouldRetry && action.type === 'retry') {
         // Cleanup old subscriptions
         run.unsubscribe?.();
+        run.stateUnsubscribe?.();
         run.exitUnsubscribe?.();
 
-        // Clean respawn
+        console.log(`[FaultRecovery] Retrying run ${run.id} after ${action.delayMs}ms delay...`);
+        run.status = 'launching';
+
         setTimeout(() => {
           this.launchAdapterInTerminal(adapter, run, context).catch((e) => {
             console.error(`[FaultRecovery] Failed to respawn session:`, e);
             run.status = 'failed';
           });
-        }, 1000);
+        }, action.delayMs ?? 1000);
         return;
+      }
+
+      // If action was reprompt, switch_model, or ask_user, handle accordingly
+      if (action.type === 'reprompt' || action.type === 'switch_model') {
+        console.log(`[FaultRecovery] ${action.type} requested - need manual intervention`);
+      }
+
+      if (action.type === 'ask_user') {
+        console.log(`[FaultRecovery] Asking user: ${action.message}`);
+        // TODO: Surface this to the UI for user confirmation
+      }
+
+      if (action.type === 'halt') {
+        console.log(`[FaultRecovery] Halting: ${action.message}`);
       }
 
       completeTaskGraphNodeForRun(this.db, run.threadId, {
         runId: run.id as AgentRunId,
         exitCode,
       });
+
+      // Notify peer orchestration of agent completion or blocker
+      if (run.meshAgentId) {
+        const durationMs = run.endTime
+          ? run.endTime.getTime() - run.startTime.getTime()
+          : undefined;
+
+        if (exitCode === 0) {
+          this.peerOrchestration.onAgentCompletion({
+            agentId: run.meshAgentId,
+            threadId: run.threadId as string,
+            summary: `Agent completed successfully with exit code ${exitCode}`,
+            durationMs,
+          });
+        } else {
+          this.peerOrchestration.onAgentBlocker({
+            agentId: run.meshAgentId,
+            threadId: run.threadId as string,
+            reason: `Agent failed with exit code ${exitCode}`,
+          });
+        }
+      }
+
       run.status = exitCode === 0 ? 'completed' : 'failed';
     });
 
-    this.terminalManager.sendInput(result.sessionId, `${shellCommand}\n`);
+    const launchInput = terminalSubmitInput(shellCommand);
+    recordTerminalInput(this.db, run.threadId, {
+      sessionId,
+      text: launchInput,
+      source: 'doorway',
+    });
+    this.terminalManager.sendInput(result.sessionId, launchInput);
+
+    if (spec.stdinPrompt) {
+      const promptInput = terminalSubmitInput(spec.stdinPrompt);
+      recordTerminalInput(this.db, run.threadId, {
+        sessionId,
+        text: promptInput,
+        source: 'doorway',
+      });
+      this.terminalManager.sendInput(result.sessionId, promptInput);
+    }
+    await this.captureProcessSnapshot(run.threadId, sessionId, result.pid, 'running');
 
     return result;
+  }
+
+  private async captureProcessSnapshot(
+    threadId: ThreadId,
+    sessionId: TerminalSessionId,
+    rootPid: number,
+    phase: ProcessSnapshotPhase
+  ): Promise<void> {
+    if (!this.processSnapshotter) {
+      return;
+    }
+    try {
+      const snapshot = await this.processSnapshotter(rootPid);
+      if (snapshot.nodes.length === 0) {
+        recordProcessSnapshotFailed(this.db, threadId, {
+          sessionId,
+          phase,
+          rootPid,
+          reason: 'No process rows were visible for the terminal root pid.',
+        });
+        return;
+      }
+      recordProcessSnapshot(this.db, threadId, {
+        sessionId,
+        phase,
+        rootPid,
+        nodes: snapshot.nodes,
+      });
+    } catch (error) {
+      recordProcessSnapshotFailed(this.db, threadId, {
+        sessionId,
+        phase,
+        rootPid,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async recordEvent(taskId: string, type: string, data: any) {
@@ -669,6 +982,91 @@ export class Orchestrator {
     const messages = this.getThreadMessages(threadId);
     return this.autoCompactor.autoCompactIfNeeded(threadId, messages, modelId);
   }
+
+  /**
+   * Answer a clarification request and resume the agent.
+   */
+  answerClarification(runId: string, answer: string): boolean {
+    const run = this.activeRuns.get(runId);
+    if (!run) {
+      console.warn(`[Orchestrator] answerClarification: run not found: ${runId}`);
+      return false;
+    }
+
+    if (!run.isPausedForClarification || !run.clarificationRequestId) {
+      console.warn(`[Orchestrator] answerClarification: run ${runId} is not paused for clarification`);
+      return false;
+    }
+
+    const clarificationResponse = this.clarificationHandler.answerRequest(
+      run.clarificationRequestId,
+      answer
+    );
+
+    if (!clarificationResponse) {
+      console.warn(`[Orchestrator] answerClarification: failed to answer request: ${run.clarificationRequestId}`);
+      return false;
+    }
+
+    // Resume the agent by sending the answer to the terminal
+    const responseInput = terminalSubmitInput(answer);
+    recordTerminalInput(this.db, run.threadId, {
+      sessionId: run.sessionId as TerminalSessionId,
+      text: responseInput,
+      source: 'user',
+    });
+    this.terminalManager.sendInput(run.sessionId, responseInput);
+    recordEvent(this.db, run.threadId, 'clarification.answered', {
+      clarificationId: clarificationResponse.requestId,
+      threadId: run.threadId,
+      runId: run.id as AgentRunId,
+      sessionId: run.sessionId as TerminalSessionId,
+      answer: redactTerminalText(answer),
+      answeredAt: new Date().toISOString(),
+    });
+
+    // Clear clarification state
+    run.isPausedForClarification = false;
+    run.clarificationRequestId = undefined;
+
+    return true;
+  }
+
+  /**
+   * Get a clarification request by ID.
+   */
+  getClarificationRequest(id: string): ClarificationRequest | undefined {
+    return this.clarificationHandler.getClarification(id);
+  }
+
+  /**
+   * Get pending clarification for a session.
+   */
+  getPendingClarification(sessionId: TerminalSessionId): ClarificationRequest | null {
+    return this.clarificationHandler.getPendingClarification(sessionId);
+  }
+
+  /**
+   * Get all pending clarifications.
+   */
+  getPendingClarifications(): ClarificationRequest[] {
+    return this.clarificationHandler.getPendingClarifications();
+  }
+
+  /**
+   * Cancel a clarification request.
+   */
+  cancelClarification(runId: string): boolean {
+    const run = this.activeRuns.get(runId);
+    if (!run || !run.clarificationRequestId) {
+      return false;
+    }
+
+    const result = this.clarificationHandler.cancelRequest(run.clarificationRequestId);
+    run.isPausedForClarification = false;
+    run.clarificationRequestId = undefined;
+    return result;
+  }
 }
 
 export interface OrchestratorRun {
@@ -690,5 +1088,9 @@ export interface OrchestratorRun {
   retryCount?: number;
   events: AgentEvent[];
   unsubscribe?: () => void;
+  stateUnsubscribe?: () => void;
   exitUnsubscribe?: () => void;
+  // Clarification handling
+  isPausedForClarification?: boolean;
+  clarificationRequestId?: string;
 }

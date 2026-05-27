@@ -9,6 +9,9 @@ import type {
   TerminalSessionId,
   TerminalSessionStatus,
   TerminalProjection,
+  TerminalControlEvent,
+  TerminalScreenSnapshot,
+  TerminalStateDetection,
   ThreadId,
   TranscriptChunk,
 } from '@doorway/protocol';
@@ -365,6 +368,10 @@ export function appendTerminalChunk(
   options: {
     readonly sessionId: TerminalSessionId;
     readonly text: string;
+    readonly cleanText?: string;
+    readonly controlEvents?: readonly TerminalControlEvent[];
+    readonly screenSnapshot?: TerminalScreenSnapshot;
+    readonly stateDetection?: TerminalStateDetection;
     readonly isStdout?: boolean;
     readonly isStderr?: boolean;
   }
@@ -376,17 +383,43 @@ export function appendTerminalChunk(
   const isStdout = options.isStdout ?? true;
   const isStderr = options.isStderr ?? false;
   const text = redactTerminalText(options.text);
+  const cleanText = redactTerminalText(options.cleanText ?? options.text);
+  const controlEvents = redactTerminalControlEvents(options.controlEvents ?? []);
+  const screenSnapshot = options.screenSnapshot
+    ? redactTerminalScreenSnapshot(options.screenSnapshot)
+    : undefined;
+  const stateDetection = options.stateDetection
+    ? redactTerminalStateDetection(options.stateDetection)
+    : undefined;
 
   db.prepare(
     `
-    INSERT INTO terminal_chunks (id, session_id, sequence, text, is_stdout, is_stderr, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO terminal_chunks (
+      id,
+      session_id,
+      sequence,
+      text,
+      raw_text,
+      clean_text,
+      control_events_json,
+      screen_snapshot_json,
+      state_detection_json,
+      is_stdout,
+      is_stderr,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
   ).run(
     generateId('term_chunk'),
     options.sessionId,
     sequence,
     text,
+    text,
+    cleanText,
+    JSON.stringify(controlEvents),
+    screenSnapshot ? JSON.stringify(screenSnapshot) : null,
+    stateDetection ? JSON.stringify(stateDetection) : null,
     isStdout ? 1 : 0,
     isStderr ? 1 : 0,
     toISOString(timestamp)
@@ -396,13 +429,27 @@ export function appendTerminalChunk(
     sessionId: options.sessionId,
     sequence,
     text,
+    rawText: text,
+    cleanText,
+    controlEvents,
+    ...(screenSnapshot ? { screenSnapshot } : {}),
+    ...(stateDetection ? { stateDetection } : {}),
     isStdout,
     isStderr,
   });
 
-  const detection = detectTerminalAttention(text, isStderr);
-  if (detection) {
-    recordTerminalAttention(db, threadId, options.sessionId, detection, 'terminal_output', text);
+  if (stateDetection) {
+    recordTerminalStateDetection(db, threadId, {
+      sessionId: options.sessionId,
+      detection: stateDetection,
+      source: 'terminal_output',
+      outputText: cleanText,
+    });
+  }
+
+  const detection = detectTerminalAttention(cleanText, isStderr);
+  if (detection && (!stateDetection || detection.state === 'needs_approval')) {
+    recordTerminalAttention(db, threadId, options.sessionId, detection, 'terminal_output', cleanText);
   }
 
   return {
@@ -410,6 +457,11 @@ export function appendTerminalChunk(
     sequence,
     timestamp,
     text,
+    rawText: text,
+    cleanText,
+    controlEvents,
+    ...(screenSnapshot ? { screenSnapshot } : {}),
+    ...(stateDetection ? { stateDetection } : {}),
     isStdout,
     isStderr,
   };
@@ -536,7 +588,18 @@ export function getTerminalTranscript(
   const rows = db
     .prepare(
       `
-      SELECT session_id, sequence, text, is_stdout, is_stderr, created_at
+      SELECT
+        session_id,
+        sequence,
+        text,
+        raw_text,
+        clean_text,
+        control_events_json,
+        screen_snapshot_json,
+        state_detection_json,
+        is_stdout,
+        is_stderr,
+        created_at
       FROM terminal_chunks
       WHERE session_id = ?
       ORDER BY sequence ASC
@@ -549,6 +612,15 @@ export function getTerminalTranscript(
     sequence: row.sequence,
     timestamp: new Date(row.created_at),
     text: row.text,
+    rawText: row.raw_text ?? row.text,
+    cleanText: row.clean_text ?? row.text,
+    controlEvents: parseTerminalControlEvents(row.control_events_json),
+    ...(row.screen_snapshot_json
+      ? { screenSnapshot: parseTerminalScreenSnapshot(row.screen_snapshot_json) }
+      : {}),
+    ...(row.state_detection_json
+      ? { stateDetection: parseTerminalStateDetection(row.state_detection_json) }
+      : {}),
     isStdout: row.is_stdout === 1,
     isStderr: row.is_stderr === 1,
   }));
@@ -620,7 +692,7 @@ export function listTerminalProjections(
         terminal_sessions.exit_recommendation,
         terminal_sessions.exit_signal_number,
         COALESCE(terminal_sessions.started_at, terminal_sessions.created_at) AS created_at,
-        terminal_chunks.text AS last_output
+        COALESCE(terminal_chunks.clean_text, terminal_chunks.text) AS last_output
       FROM terminal_sessions
       LEFT JOIN terminal_chunks
         ON terminal_chunks.session_id = terminal_sessions.id
@@ -707,10 +779,168 @@ function assertTerminalSessionExists(db: Database.Database, sessionId: TerminalS
   }
 }
 
+function parseTerminalControlEvents(value: string | null): readonly TerminalControlEvent[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as TerminalControlEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseTerminalStateDetection(value: string | null): TerminalStateDetection | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as TerminalStateDetection;
+    return typeof parsed?.state === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseTerminalScreenSnapshot(value: string | null): TerminalScreenSnapshot | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as TerminalScreenSnapshot;
+    return typeof parsed?.visibleText === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function redactTerminalControlEvents(
+  events: readonly TerminalControlEvent[]
+): readonly TerminalControlEvent[] {
+  return events.map((event) => {
+    if ('sequence' in event) {
+      return { ...event, sequence: redactTerminalText(event.sequence) };
+    }
+    return event;
+  });
+}
+
+function redactTerminalStateDetection(detection: TerminalStateDetection): TerminalStateDetection {
+  return {
+    ...detection,
+    reason: redactTerminalText(detection.reason),
+    signals: detection.signals.map(redactTerminalText),
+  };
+}
+
+function redactTerminalScreenSnapshot(snapshot: TerminalScreenSnapshot): TerminalScreenSnapshot {
+  return {
+    ...snapshot,
+    visibleText: redactTerminalText(snapshot.visibleText),
+    ...(snapshot.alternateText
+      ? { alternateText: redactTerminalText(snapshot.alternateText) }
+      : {}),
+  };
+}
+
+export function recordTerminalStateDetection(
+  db: Database.Database,
+  threadId: ThreadId,
+  options: {
+    readonly sessionId: TerminalSessionId;
+    readonly detection: TerminalStateDetection;
+    readonly source: 'terminal_output' | 'silence_confirmation' | 'process_exit';
+    readonly outputText?: string;
+  }
+): void {
+  assertTerminalSessionExists(db, options.sessionId);
+  const sessionId = options.sessionId;
+  const detection = redactTerminalStateDetection(options.detection);
+  const status = terminalStatusFromDetection(detection);
+  if (status) {
+    db.prepare('UPDATE terminal_sessions SET status = ? WHERE id = ?').run(status, sessionId);
+  }
+
+  const agentRunId = terminalAgentRunId(db, sessionId);
+  recordEvent(db, threadId, 'terminal.state', {
+    sessionId,
+    ...(agentRunId ? { agentRunId } : {}),
+    detection,
+    source: options.source,
+    ...(options.outputText ? { outputPreview: outputPreview(options.outputText) } : {}),
+  });
+
+  const attention = terminalAttentionFromDetection(detection);
+  if (attention) {
+    recordTerminalAttention(
+      db,
+      threadId,
+      sessionId,
+      attention,
+      options.source === 'process_exit' ? 'process_exit' : 'terminal_output',
+      options.outputText
+    );
+  }
+}
+
+function terminalStatusFromDetection(
+  detection: TerminalStateDetection
+): TerminalSessionStatus | undefined {
+  switch (detection.state) {
+    case 'awaiting_input':
+    case 'complete':
+      return 'waiting';
+    case 'thinking':
+    case 'outputting':
+      return 'running';
+    case 'failed':
+    case 'stuck':
+      return 'crashed';
+    case 'unknown':
+      return undefined;
+  }
+}
+
+function terminalAttentionFromDetection(
+  detection: TerminalStateDetection
+): TerminalAttentionDetection | undefined {
+  switch (detection.state) {
+    case 'awaiting_input':
+      return {
+        state: 'needs_input',
+        reason: detection.reason,
+        score: detection.confidence,
+        recommendedState: 'waiting_for_user',
+        signals: detection.signals,
+      };
+    case 'complete':
+      return {
+        state: 'quiet',
+        reason: detection.reason,
+        score: detection.confidence,
+        recommendedState: 'probably_done',
+        signals: detection.signals,
+      };
+    case 'failed':
+    case 'stuck':
+      return {
+        state: 'failed',
+        reason: detection.reason,
+        score: detection.confidence,
+        recommendedState: 'failed',
+        signals: detection.signals,
+      };
+    case 'thinking':
+    case 'outputting':
+    case 'unknown':
+      return undefined;
+  }
+}
+
 interface TerminalChunkRow {
   readonly session_id: string;
   readonly sequence: number;
   readonly text: string;
+  readonly raw_text: string | null;
+  readonly clean_text: string | null;
+  readonly control_events_json: string | null;
+  readonly screen_snapshot_json: string | null;
+  readonly state_detection_json: string | null;
   readonly is_stdout: number;
   readonly is_stderr: number;
   readonly created_at: string;

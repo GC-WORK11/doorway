@@ -2,6 +2,11 @@
   "name": "@doorway/desktop",
   "version": "0.1.0",
   "description": "Doorway Desktop - Local-first agent IDE",
+  "author": {
+    "name": "Doorway Team",
+    "email": "team@doorway.app"
+  },
+  "homepage": "https://doorway.app",
   "type": "module",
   "main": "dist/main/index.cjs",
   "scripts": {
@@ -13,7 +18,10 @@
     "smoke:renderer:populated": "DOORWAY_RENDERER_STATE=populated DOORWAY_RENDERER_SCREENSHOT=/tmp/doorway-renderer-populated-smoke.png node scripts/smoke-renderer.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --root . src/**/*.test.ts src/**/*.test.tsx",
-    "lint": "eslint src --ext .ts,.tsx"
+    "lint": "eslint src --ext .ts,.tsx",
+    "package": "electron-builder --dir",
+    "release": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@doorway/adapters": "workspace:^",
@@ -23,9 +31,9 @@
     "@doorway/protocol": "workspace:*",
     "@doorway/review-merge": "workspace:^",
     "@doorway/terminal-runtime": "workspace:^",
+    "better-sqlite3": "^11.0.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "electron": "^31.1.0",
     "framer-motion": "^12.39.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -36,6 +44,8 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.5.0",
+    "electron": "^31.1.0",
+    "electron-builder": "^24.13.3",
     "esbuild": "^0.21.0",
     "playwright-core": "^1.60.0",
     "postcss": "^8.5.15",
@@ -43,5 +53,38 @@
     "typescript": "^5.4.5",
     "vite": "^5.3.1",
     "vitest": "^1.6.0"
+  },
+  "build": {
+    "appId": "com.doorway.desktop",
+    "productName": "Doorway",
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist/main/index.cjs"
+    }
   }
 }

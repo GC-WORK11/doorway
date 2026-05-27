@@ -139,14 +139,17 @@ describe('PeerProtocolService', () => {
         role: 'helper',
       });
 
-      expect(registerMeshAgent).toHaveBeenCalledWith(db, expect.objectContaining({
-        threadId: 'thread-1',
-        displayName: 'New Agent',
-        kind: 'visible_cli',
-        toolName: 'bash',
-        role: 'helper',
-        status: 'starting',
-      }));
+      expect(registerMeshAgent).toHaveBeenCalledWith(
+        db,
+        expect.objectContaining({
+          threadId: 'thread-1',
+          displayName: 'New Agent',
+          kind: 'visible_cli',
+          toolName: 'bash',
+          role: 'helper',
+          status: 'starting',
+        })
+      );
     });
   });
 
@@ -158,7 +161,9 @@ describe('PeerProtocolService', () => {
     it('should update peer status in database', () => {
       peerProtocol.updatePeerStatus('agent-1', 'done');
 
-      const row = db.prepare('SELECT status FROM agent_mesh_agents WHERE id = ?').get('agent-1') as any;
+      const row = db
+        .prepare('SELECT status FROM agent_mesh_agents WHERE id = ?')
+        .get('agent-1') as any;
       expect(row.status).toBe('done');
     });
 
@@ -408,24 +413,18 @@ describe('PeerProtocolService', () => {
 
   describe('status mapping', () => {
     it('should map running statuses correctly', () => {
-      (listMeshAgents as any).mockReturnValue([
-        { ...mockAgents[0], status: 'starting' },
-      ]);
+      (listMeshAgents as any).mockReturnValue([{ ...mockAgents[0], status: 'starting' }]);
 
       let result = peerProtocol.whoIsRunning('thread-1');
       expect(result[0].peerStatus).toBe('running');
 
-      (listMeshAgents as any).mockReturnValue([
-        { ...mockAgents[0], status: 'running' },
-      ]);
+      (listMeshAgents as any).mockReturnValue([{ ...mockAgents[0], status: 'running' }]);
       result = peerProtocol.whoIsRunning('thread-1');
       expect(result[0].peerStatus).toBe('running');
     });
 
     it('should map waiting statuses correctly', () => {
-      (listMeshAgents as any).mockReturnValue([
-        { ...mockAgents[0], status: 'waiting' },
-      ]);
+      (listMeshAgents as any).mockReturnValue([{ ...mockAgents[0], status: 'waiting' }]);
 
       const result = peerProtocol.queryPeers({
         threadId: 'thread-1',
@@ -437,9 +436,7 @@ describe('PeerProtocolService', () => {
     });
 
     it('should map done to completed', () => {
-      (listMeshAgents as any).mockReturnValue([
-        { ...mockAgents[0], status: 'done' },
-      ]);
+      (listMeshAgents as any).mockReturnValue([{ ...mockAgents[0], status: 'done' }]);
 
       const result = peerProtocol.queryPeers({
         threadId: 'thread-1',
@@ -451,9 +448,7 @@ describe('PeerProtocolService', () => {
     });
 
     it('should map failed correctly', () => {
-      (listMeshAgents as any).mockReturnValue([
-        { ...mockAgents[0], status: 'failed' },
-      ]);
+      (listMeshAgents as any).mockReturnValue([{ ...mockAgents[0], status: 'failed' }]);
 
       const result = peerProtocol.queryPeers({
         threadId: 'thread-1',

@@ -499,6 +499,7 @@ export function TerminalMuxPanel() {
     terminalSessions,
     terminalTranscript,
     terminalInputs,
+    terminalBlocks,
     threadEvents,
     worktrees,
     createTerminal: onCreateSession,
@@ -629,6 +630,7 @@ export function TerminalMuxPanel() {
       <div className="terminal-mux__main">
         <TerminalSurface
           terminalTranscript={terminalTranscript}
+          terminalBlocks={terminalBlocks}
           fallbackText={fallbackText}
           activeTerminalSessionId={activeTerminalSessionId as TerminalSessionId | null}
           onInput={onInput}
@@ -654,10 +656,18 @@ export function TerminalMuxPanel() {
           )}
         </section>
 
-        <section className="terminal-evidence-strip" aria-label="Terminal evidence details" style={{ display: 'flex', gap: '1rem', overflowX: 'auto', padding: '1rem' }}>
-          <ProcessTreePanel terminalSessions={activeTerminalSession ? [activeTerminalSession] : []} />
+        <section
+          className="terminal-evidence-strip"
+          aria-label="Terminal evidence details"
+          style={{ display: 'flex', gap: '1rem', overflowX: 'auto', padding: '1rem' }}
+        >
+          <ProcessTreePanel
+            terminalSessions={activeTerminalSession ? [activeTerminalSession] : []}
+          />
           <FileDeltaPanel terminalSessions={activeTerminalSession ? [activeTerminalSession] : []} />
-          <ExitTaxonomyPanel terminalSessions={activeTerminalSession ? [activeTerminalSession] : []} />
+          <ExitTaxonomyPanel
+            terminalSessions={activeTerminalSession ? [activeTerminalSession] : []}
+          />
         </section>
 
         <footer className="terminal-mux__status" aria-label="Terminal metadata">

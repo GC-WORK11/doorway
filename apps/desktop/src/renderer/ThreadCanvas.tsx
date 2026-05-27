@@ -77,6 +77,8 @@ export function ThreadCanvas() {
     setActiveSurface,
     projectPath,
     setProjectPath,
+    selectProjectFolder,
+    openProject,
     submitProject,
     threadTitle,
     setThreadTitle,
@@ -184,9 +186,12 @@ export function ThreadCanvas() {
           {!activeProject ? (
             <FirstRunProjectPanel
               loading={loading}
-              projectPath={projectPath}
-              setProjectPath={setProjectPath}
-              submitProject={submitProject}
+              onSelectFolder={async () => {
+                const path = await selectProjectFolder();
+                if (path) {
+                  await openProject(path);
+                }
+              }}
             />
           ) : !activeThread ? (
             <EmptyProjectThreadPanel

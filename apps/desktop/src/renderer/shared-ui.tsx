@@ -20,7 +20,34 @@ export type SlashCommand =
   | '/merge'
   | '/tools'
   | '/plugins'
-  | '/automations';
+  | '/automations'
+  | '/think'
+  | '/continue'
+  | '/retry'
+  | '/abort'
+  | '/history'
+  | '/context'
+  | '/clear'
+  | '/theme'
+  | '/git'
+  | '/search'
+  | '/settings'
+  | '/computer'
+  | '/loop'
+  | '/pr-review'
+  | '/refactor'
+  | '/security'
+  | '/performance'
+  | '/export'
+  | '/import'
+  | '/tokens'
+  | '/ssh'
+  | '/docker'
+  | '/deploy'
+  | '/monitor'
+  | '/screenshot'
+  | '/keyboard'
+  | '/migrate';
 
 export type ComposerMentionTarget = {
   readonly id: string;
@@ -103,14 +130,10 @@ export function ProjectInstructionStatus({
 
 export function FirstRunProjectPanel({
   loading,
-  projectPath,
-  setProjectPath,
-  submitProject,
+  onSelectFolder,
 }: {
   readonly loading: boolean;
-  readonly projectPath: string;
-  readonly setProjectPath: (value: string) => void;
-  readonly submitProject: () => void;
+  readonly onSelectFolder: () => void;
 }) {
   return (
     <motion.section
@@ -120,7 +143,7 @@ export function FirstRunProjectPanel({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: 'easeOut' }}
     >
-      <div className="first-run-panel__intro">
+      <div className="first-run-panel__dropzone">
         <svg
           className="first-run-panel__icon"
           viewBox="0 0 48 48"
@@ -129,69 +152,14 @@ export function FirstRunProjectPanel({
           stroke="currentColor"
           strokeWidth="1.5"
         >
-          <rect x="8" y="12" width="32" height="28" rx="3" />
-          <path d="M16 12V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" />
-          <circle cx="24" cy="28" r="5" />
-          <path d="M24 31v3" strokeLinecap="round" />
+          <rect x="8" y="16" width="32" height="24" rx="3" />
+          <path d="M16 16v-4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" />
+          <path d="M24 22v10M20 28l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className="section-label">Local workspace</span>
         <h2>Open a local repository</h2>
-        <p>
-          Doorway loads persisted threads, worktrees, terminal transcripts, diffs, approvals, and
-          proof records from local state.
-        </p>
-      </div>
-      <div className="first-run-panel__checks" aria-label="Local evidence surfaces">
-        <span>
-          <svg
-            viewBox="0 0 16 16"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <circle cx="8" cy="8" r="6" />
-            <path d="M5.5 8 7 9.5 10.5 6" />
-          </svg>
-          SQLite ledger
-        </span>
-        <span>
-          <svg
-            viewBox="0 0 16 16"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <circle cx="5" cy="5" r="2" />
-            <circle cx="11" cy="5" r="2" />
-            <circle cx="8" cy="11" r="2" />
-            <path d="M6.2 6.5 7.5 9.8M9.8 6.5 8.5 9.8M6 5h4" />
-          </svg>
-          Git worktrees
-        </span>
-        <span>
-          <svg
-            viewBox="0 0 16 16"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <path d="M8 2 10.5 5.5H14l-3.5 3.5 1.5 4-4-2.5-4 2.5 1.5-4L2 5.5h3.5Z" />
-          </svg>
-          Replay evidence
-        </span>
-      </div>
-      <div className="first-run-panel__form">
-        <input
-          value={projectPath}
-          onChange={(event) => setProjectPath(event.target.value)}
-          placeholder="/path/to/project"
-          aria-label="Project path"
-        />
-        <button type="button" disabled={loading || !projectPath.trim()} onClick={submitProject}>
-          Open project
+        <p>Drop your project folder here, or click to browse</p>
+        <button type="button" className="select-folder-btn" disabled={loading} onClick={onSelectFolder}>
+          Select Folder
         </button>
       </div>
     </motion.section>

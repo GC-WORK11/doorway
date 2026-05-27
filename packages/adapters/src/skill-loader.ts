@@ -304,7 +304,10 @@ function parseListValue(value: string): string[] {
   // Remove brackets and quotes
   const cleaned = value.replace(/[[\]"']/g, '').trim();
   if (!cleaned) return [];
-  return cleaned.split(',').map((item) => item.trim()).filter(Boolean);
+  return cleaned
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function errorMessage(error: unknown): string {

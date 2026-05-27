@@ -340,9 +340,7 @@ export class PeerProtocolService {
   // --------------------------------------------------------------------------
 
   private getPeerAgent(agentId: string): RegisteredMeshAgent {
-    const row = this.db
-      .prepare('SELECT * FROM agent_mesh_agents WHERE id = ?')
-      .get(agentId) as any;
+    const row = this.db.prepare('SELECT * FROM agent_mesh_agents WHERE id = ?').get(agentId) as any;
 
     if (!row) {
       throw new Error(`Peer agent not found: ${agentId}`);

@@ -14,7 +14,7 @@ if (!existsSync(outDir)) {
   mkdirSync(outDir, { recursive: true });
 }
 
-const files = ['handlers.ts', 'index.ts'];
+const files = ['index.ts'];
 
 for (const file of files) {
   const src = resolve(srcDir, file);

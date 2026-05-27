@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { PatternSurfaceService, createPatternSurfaceService, type PatternEvent } from './pattern-surface.js';
+import {
+  PatternSurfaceService,
+  createPatternSurfaceService,
+  type PatternEvent,
+} from './pattern-surface.js';
 
 describe('PatternSurfaceService', () => {
   let service: PatternSurfaceService;
@@ -120,7 +124,12 @@ describe('PatternSurfaceService', () => {
   describe('getPatterns', () => {
     it('should return all patterns when no type specified', () => {
       service.recordEvent({ type: 'command', command: 'ls', timestamp: new Date() });
-      service.recordEvent({ type: 'model_preference', taskType: 't1', modelId: 'm1', timestamp: new Date() });
+      service.recordEvent({
+        type: 'model_preference',
+        taskType: 't1',
+        modelId: 'm1',
+        timestamp: new Date(),
+      });
 
       const patterns = service.getPatterns();
       expect(patterns).toHaveLength(2);
@@ -129,7 +138,12 @@ describe('PatternSurfaceService', () => {
     it('should filter patterns by type', () => {
       service.recordEvent({ type: 'command', command: 'ls', timestamp: new Date() });
       service.recordEvent({ type: 'command', command: 'cat', timestamp: new Date() });
-      service.recordEvent({ type: 'model_preference', taskType: 't1', modelId: 'm1', timestamp: new Date() });
+      service.recordEvent({
+        type: 'model_preference',
+        taskType: 't1',
+        modelId: 'm1',
+        timestamp: new Date(),
+      });
 
       const commandPatterns = service.getPatterns('command');
       expect(commandPatterns).toHaveLength(2);
@@ -181,7 +195,7 @@ describe('PatternSurfaceService', () => {
       }
 
       const suggestions = service.getSuggestions();
-      const pipelineSuggestion = suggestions.find(s => s.suggestion.includes('pipeline'));
+      const pipelineSuggestion = suggestions.find((s) => s.suggestion.includes('pipeline'));
       expect(pipelineSuggestion).toBeDefined();
     });
   });
@@ -283,7 +297,7 @@ describe('PatternSurfaceService', () => {
       }
 
       const suggestions = service.getSuggestions();
-      const toolSuggestion = suggestions.find(s => s.suggestion.includes('unreliable-tool'));
+      const toolSuggestion = suggestions.find((s) => s.suggestion.includes('unreliable-tool'));
       expect(toolSuggestion).toBeDefined();
       expect(toolSuggestion?.suggestion).toContain('failure rate');
     });

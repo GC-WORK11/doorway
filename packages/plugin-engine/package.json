@@ -1,8 +1,10 @@
 {
   "name": "@doorway/plugin-engine",
   "version": "0.1.0",
+  "type": "module",
   "main": "src/index.ts",
   "dependencies": {
+    "@doorway/adapters": "workspace:*",
     "@doorway/core": "workspace:*",
     "@doorway/protocol": "workspace:*"
   }

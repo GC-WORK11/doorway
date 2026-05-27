@@ -41,6 +41,8 @@ import type {
   TranscriptChunk,
   WorktreeProjection,
 } from '@doorway/protocol';
+import { terminalSubmitInput } from '@doorway/protocol';
+import type { TerminalBlock } from '@doorway/terminal-runtime';
 
 // ============================================================================
 // Utilities
@@ -64,14 +66,27 @@ export function launchThreadRefreshId(
 export function mergeLaunchedThreadList(
   threads: readonly ThreadProjection[],
   launchedThread: ThreadProjection
-): readonly ThreadProjection[] {
+): ThreadProjection[] {
   return threads.some((thread) => thread.id === launchedThread.id)
-    ? threads
+    ? [...threads]
     : [launchedThread, ...threads];
 }
 
+export interface AgentLaunchResult {
+  readonly runId?: string;
+  readonly runIds?: readonly string[];
+  readonly threadId?: string;
+  readonly sessionId?: string;
+  readonly reusedLane?: boolean;
+  readonly multiAgent?: boolean;
+}
+
+export function primaryLaunchRunId(result: AgentLaunchResult): string | undefined {
+  return result.runId ?? result.runIds?.[0];
+}
+
 export function permissionDecisionTerminalInput(decision: PermissionDecision): string {
-  return decision === 'approved' ? 'y\n' : 'n\n';
+  return terminalSubmitInput(decision === 'approved' ? 'y' : 'n');
 }
 
 // ============================================================================
@@ -122,6 +137,7 @@ export function mergeLiveTerminalChunk(
 }
 
 interface DoorwayAPI {
+  selectProjectFolder(): Promise<string | null>;
   openProject(req: {
     path: string;
     name?: string;
@@ -132,6 +148,7 @@ interface DoorwayAPI {
   listProjects(): Promise<ProjectProjection[]>;
   listProjectMemorySources(req: { path: string }): Promise<ProjectMemorySource[]>;
   listProjectPlugins(req: { projectId: string }): Promise<ProjectPluginProjection[]>;
+  listProjectFiles(path: string): Promise<any[]>;
   listProviderModels(): Promise<ProviderModelProjection[]>;
   listToolCapabilities(req?: {
     projectId?: string;
@@ -214,7 +231,7 @@ interface DoorwayAPI {
     prompt: string;
     provider?: string;
     launchOptions?: AgentLaunchOptions;
-  }): Promise<{ runId: string }>;
+  }): Promise<AgentLaunchResult>;
   launchBestOfN(req: {
     threadId?: string;
     projectId?: string;
@@ -237,6 +254,7 @@ interface DoorwayAPI {
   resizeTerminal(sessionId: string, cols: number, rows: number): Promise<void>;
   stopTerminal(sessionId: string): Promise<{ stopped: boolean }>;
   getTerminalTranscript(sessionId: string): Promise<TranscriptChunk[]>;
+  getTerminalBlocks(sessionId: string): Promise<TerminalBlock[]>;
   getTerminalInputs(sessionId: string): Promise<TerminalInputProjection[]>;
   listTerminals(threadId: string): Promise<TerminalProjection[]>;
 
@@ -295,6 +313,23 @@ interface DoorwayAPI {
       screenshot?: string;
     }) => void
   ): () => void;
+
+  // Clarification
+  answerClarification(req: { runId: string; answer: string }): Promise<{ success: boolean; runId: string }>;
+  getClarification(clarificationId: string): Promise<ClarificationProjection | null>;
+  pendingClarifications(sessionId: string): Promise<ClarificationProjection[]>;
+}
+
+export interface ClarificationProjection {
+  readonly id: string;
+  readonly runId: string;
+  readonly threadId: string;
+  readonly sessionId: string;
+  readonly question: string;
+  readonly context?: string;
+  readonly suggestedResponses?: string[];
+  readonly status: 'pending' | 'answered' | 'cancelled';
+  readonly createdAt: Date;
 }
 
 // ============================================================================
@@ -325,10 +360,12 @@ function emptyOperationalMemoryProjection(threadId: string): OperationalMemoryPr
 
 export function createUnavailableDoorwayAPI(): DoorwayAPI {
   return {
+    selectProjectFolder: async () => bridgeUnavailable('selectProjectFolder'),
     openProject: async () => bridgeUnavailable('openProject'),
     listProjects: async () => [],
     listProjectMemorySources: async () => [],
     listProjectPlugins: async () => [],
+    listProjectFiles: async () => [],
     listProviderModels: async () => [],
     listToolCapabilities: async () => [],
     listToolLanes: async () => [],
@@ -373,6 +410,7 @@ export function createUnavailableDoorwayAPI(): DoorwayAPI {
     resizeTerminal: async () => bridgeUnavailable('resizeTerminal'),
     stopTerminal: async () => bridgeUnavailable('stopTerminal'),
     getTerminalTranscript: async () => [],
+    getTerminalBlocks: async () => [],
     getTerminalInputs: async () => [],
     listTerminals: async () => [],
 
@@ -395,6 +433,10 @@ export function createUnavailableDoorwayAPI(): DoorwayAPI {
     exportBrowserEvidence: async () => bridgeUnavailable('exportBrowserEvidence'),
     onBrowserStateChange: noopSubscription,
     onBrowserAction: noopSubscription,
+
+    answerClarification: async () => bridgeUnavailable('answerClarification'),
+    getClarification: async () => null,
+    pendingClarifications: async () => [],
   };
 }
 
@@ -407,6 +449,7 @@ const unavailableDoorwayAPI = createUnavailableDoorwayAPI();
 export function useDoorway() {
   const [projects, setProjects] = useState<ProjectProjection[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectProjection | null>(null);
+  const [projectFiles, setProjectFiles] = useState<any[]>([]);
   const [projectMemorySources, setProjectMemorySources] = useState<ProjectMemorySource[]>([]);
   const [projectPlugins, setProjectPlugins] = useState<ProjectPluginProjection[]>([]);
   const [providerModels, setProviderModels] = useState<ProviderModelProjection[]>([]);
@@ -432,6 +475,7 @@ export function useDoorway() {
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [terminalSessions, setTerminalSessions] = useState<TerminalProjection[]>([]);
   const [terminalTranscript, setTerminalTranscript] = useState<TranscriptChunk[]>([]);
+  const [terminalBlocks, setTerminalBlocks] = useState<TerminalBlock[]>([]);
   const [terminalInputs, setTerminalInputs] = useState<TerminalInputProjection[]>([]);
   const [worktrees, setWorktrees] = useState<WorktreeProjection[]>([]);
   const [selectedWorktreePath, setSelectedWorktreePath] = useState<string | null>(null);
@@ -462,6 +506,22 @@ export function useDoorway() {
       ? undefined
       : (window as unknown as { doorway?: DoorwayAPI }).doorway;
   const api: DoorwayAPI = doorwayBridge ?? unavailableDoorwayAPI;
+
+  const loadProjectFiles = useCallback(async (path: string) => {
+    try {
+      setProjectFiles(await api.listProjectFiles(path));
+    } catch (err) {
+      console.error('Failed to load project files:', err);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    if (activeProject) {
+      void loadProjectFiles(activeProject.path);
+    } else {
+      setProjectFiles([]);
+    }
+  }, [activeProject, loadProjectFiles]);
 
   useEffect(() => {
     const unsubState = api.onBrowserStateChange?.((state) => setBrowserState(state));
@@ -497,15 +557,22 @@ export function useDoorway() {
   useEffect(() => {
     if (!activeThread) return;
     const unsubscribe = api.onDbChange((payload) => {
-      const p = payload as { table?: string; action?: string; threadId?: string };
+      const p = payload as {
+        table?: string;
+        action?: string;
+        threadId?: string;
+        payload?: { threadId?: string };
+      };
+      const changedThreadId = p.threadId ?? p.payload?.threadId;
       // Only reload if the change is relevant to the active thread or a global table
-      if (!p.threadId || p.threadId === activeThread.id) {
+      if (!changedThreadId || changedThreadId === activeThread.id) {
         void Promise.all([
           api.getThreadPeerMessages(activeThread.id),
           api.getThreadEvents(activeThread.id),
           api.listToolLanes(activeThread.id),
           api.getThreadOperationalMemory(activeThread.id),
           api.getThreadTaskGraphs(activeThread.id),
+          api.listTerminals(activeThread.id),
         ]).then(
           ([
             nextPeerMessages,
@@ -513,12 +580,17 @@ export function useDoorway() {
             nextToolLanes,
             nextOperationalMemory,
             nextTaskGraphs,
+            nextTerminalSessions,
           ]) => {
             setPeerMessages(nextPeerMessages);
             setThreadEvents(nextEvents);
             setToolLanes(nextToolLanes);
             setOperationalMemory(nextOperationalMemory);
             setTaskGraphs(nextTaskGraphs);
+            setTerminalSessions(nextTerminalSessions);
+            if (activeProject) {
+              void loadProjectFiles(activeProject.path);
+            }
           },
           (err: unknown) => {
             console.error('Failed to process db change sync', err);
@@ -527,7 +599,7 @@ export function useDoorway() {
       }
     });
     return unsubscribe;
-  }, [activeThread]);
+  }, [activeThread, activeProject, loadProjectFiles]);
 
   useEffect(() => {
     void loadProjects();
@@ -537,10 +609,14 @@ export function useDoorway() {
   }, []);
 
   useEffect(() => {
-    if (terminalSessions.length > 0 && !activeTerminalSessionId) {
-      setActiveTerminalSessionId(terminalSessions[0].id);
+    if (terminalSessions.length > 0) {
+      if (!activeTerminalSessionId || activeTerminalSessionId === 'current') {
+        setActiveTerminalSessionId(terminalSessions[0].id);
+      }
     }
   }, [terminalSessions, activeTerminalSessionId]);
+
+
 
   const loadProviderModels = useCallback(async () => {
     try {
@@ -730,42 +806,69 @@ export function useDoorway() {
   }, []);
 
   const loadTerminalTranscript = useCallback(async (sessionId: string) => {
+    if (!sessionId || sessionId === 'current') {
+      setTerminalTranscript([]);
+      return;
+    }
     try {
       setTerminalTranscript(await api.getTerminalTranscript(sessionId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load terminal transcript');
     }
-  }, []);
+  }, [api]);
+
+  const loadTerminalBlocks = useCallback(async (sessionId: string) => {
+    if (!sessionId || sessionId === 'current') {
+      setTerminalBlocks([]);
+      return;
+    }
+    try {
+      setTerminalBlocks(await api.getTerminalBlocks(sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load terminal blocks');
+    }
+  }, [api]);
 
   const loadTerminalInputs = useCallback(async (sessionId: string) => {
+    if (!sessionId || sessionId === 'current') {
+      setTerminalInputs([]);
+      return;
+    }
     try {
       setTerminalInputs(await api.getTerminalInputs(sessionId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load terminal inputs');
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (activeTerminalSessionId) {
       void loadTerminalTranscript(activeTerminalSessionId);
+      void loadTerminalBlocks(activeTerminalSessionId);
       void loadTerminalInputs(activeTerminalSessionId);
     } else {
       setTerminalTranscript([]);
+      setTerminalBlocks([]);
       setTerminalInputs([]);
     }
-  }, [activeTerminalSessionId, loadTerminalTranscript, loadTerminalInputs]);
+  }, [activeTerminalSessionId, loadTerminalTranscript, loadTerminalBlocks, loadTerminalInputs]);
 
   const selectTerminalSession = useCallback(
     async (sessionId: string | null) => {
       setActiveTerminalSessionId(sessionId);
       if (sessionId) {
-        await Promise.all([loadTerminalTranscript(sessionId), loadTerminalInputs(sessionId)]);
+        await Promise.all([
+          loadTerminalTranscript(sessionId),
+          loadTerminalBlocks(sessionId),
+          loadTerminalInputs(sessionId),
+        ]);
       } else {
         setTerminalTranscript([]);
+        setTerminalBlocks([]);
         setTerminalInputs([]);
       }
     },
-    [loadTerminalTranscript, loadTerminalInputs]
+    [loadTerminalTranscript, loadTerminalBlocks, loadTerminalInputs]
   );
 
   const writeActiveTerminal = useCallback(
@@ -800,6 +903,16 @@ export function useDoorway() {
     loadToolLanes,
     loadOperationalMemory,
   ]);
+
+  const selectProjectFolder = useCallback(async () => {
+    try {
+      const path = await api.selectProjectFolder();
+      return path;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to select folder');
+      return null;
+    }
+  }, []);
 
   const openProject = useCallback(
     async (
@@ -905,6 +1018,7 @@ export function useDoorway() {
 
   const selectThread = useCallback(
     async (threadId: string) => {
+      setError(null);
       const thread = threadId ? (threads.find((t) => t.id === threadId) ?? null) : null;
       setActiveThread(thread);
       if (thread) {
@@ -1128,9 +1242,10 @@ export function useDoorway() {
 
   const launchAgent = useCallback(
     async (prompt: string, provider?: string, launchOptions?: AgentLaunchOptions) => {
+      setError(null);
       const targetProjectId = activeProject?.id;
       const targetThreadId = activeThread?.id;
-      let result: { runId: string };
+      let result: AgentLaunchResult;
       if (targetThreadId) {
         result = await api.launchAgent({
           threadId: targetThreadId,
@@ -1146,26 +1261,49 @@ export function useDoorway() {
           launchOptions,
         });
       } else throw new Error('Select a project or thread first');
-      if (targetThreadId) {
-        const launchedThread = activeThread ?? (await api.getThread(targetThreadId));
+
+      const refreshThreadId = launchThreadRefreshId(activeThread, result.threadId);
+      if (result.threadId) {
+        const launchedThread = await api.getThread(result.threadId);
         if (launchedThread) {
-          setThreads((prev) => {
-            const exists = prev.some((t) => t.id === launchedThread.id);
-            return exists ? prev : [launchedThread, ...prev];
-          });
+          setThreads((prev) => mergeLaunchedThreadList(prev, launchedThread));
           setActiveThread(launchedThread);
         }
       }
-      if (targetThreadId) {
+      if (refreshThreadId) {
+        const persisted = await readPersistedThreadState(api, refreshThreadId);
+        setMessages(persisted.messages);
+        setThreadEvents(persisted.events);
+        setProofs(persisted.proofs);
+        setPermissionReceipts(persisted.permissionReceipts);
+        setMergeAssessments(persisted.mergeAssessments);
+        setHandoffCapsules(persisted.handoffCapsules);
+        setPeerMessages(persisted.peerMessages);
+        setTaskGraphs(persisted.taskGraphs);
         await Promise.all([
-          loadTerminalSessions(targetThreadId),
-          loadToolLanes(targetThreadId),
-          loadMessages(targetThreadId),
+          loadTerminalSessions(refreshThreadId),
+          loadToolLanes(refreshThreadId),
+          loadOperationalMemory(refreshThreadId),
+          loadCompactCheckpoints(refreshThreadId),
         ]);
       }
-      return result.runId;
+      if (result.sessionId && result.sessionId !== 'current') {
+        setActiveTerminalSessionId(result.sessionId);
+      }
+      const runId = primaryLaunchRunId(result);
+      if (!runId) {
+        throw new Error('Agent launch did not return a run id.');
+      }
+      return runId;
     },
-    [activeProject, activeThread, loadTerminalSessions, loadToolLanes, loadMessages]
+    [
+      activeProject,
+      activeThread,
+      loadTerminalSessions,
+      loadToolLanes,
+      loadOperationalMemory,
+      loadCompactCheckpoints,
+    ]
   );
 
   const launchBestOfN = useCallback(
@@ -1308,6 +1446,8 @@ export function useDoorway() {
   return {
     projects,
     activeProject,
+    projectFiles,
+    loadProjectFiles,
     projectMemorySources,
     projectPlugins,
     providerModels,
@@ -1331,6 +1471,7 @@ export function useDoorway() {
     activeTerminalSessionId,
     terminalSessions,
     terminalTranscript,
+    terminalBlocks,
     terminalInputs,
     worktrees,
     selectedWorktreePath,
@@ -1340,6 +1481,8 @@ export function useDoorway() {
     threadReplayVerification,
     loading,
     error,
+    setError,
+    selectProjectFolder,
     api,
     openProject,
     selectProject,
@@ -1385,6 +1528,5 @@ export function useDoorway() {
     deleteProjectAutomation,
     loadAutomationRuns,
     runProjectAutomationNow,
-    setError,
   };
 }

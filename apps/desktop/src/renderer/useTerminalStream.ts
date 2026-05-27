@@ -7,8 +7,18 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 
+export interface ClarificationMessage {
+  readonly type: 'clarification';
+  readonly sessionId: string;
+  readonly clarificationId: string;
+  readonly question: string;
+  readonly context?: string;
+  readonly suggestedResponses?: string[];
+  readonly timestamp: string;
+}
+
 export interface StreamMessage {
-  readonly type: 'data' | 'exit' | 'resize' | 'error';
+  readonly type: 'data' | 'exit' | 'resize' | 'error' | 'clarification';
   readonly sessionId: string;
   readonly data?: string;
   readonly exitCode?: number;
@@ -16,14 +26,19 @@ export interface StreamMessage {
   readonly cols?: number;
   readonly rows?: number;
   readonly error?: string;
+  readonly clarificationId?: string;
+  readonly question?: string;
+  readonly context?: string;
+  readonly suggestedResponses?: string[];
   readonly timestamp: string;
 }
 
 export interface UseTerminalStreamOptions {
   readonly sessionId: string;
-  readonly onData?: (data: string) => void;
+  readonly onData?: (data: string, message: StreamMessage) => void;
   readonly onExit?: (exitCode: number, signal: string | null) => void;
   readonly onResize?: (cols: number, rows: number) => void;
+  readonly onClarification?: (clarification: ClarificationMessage) => void;
   readonly enabled?: boolean;
 }
 
@@ -40,7 +55,7 @@ export interface UseTerminalStreamResult {
  * Hook for streaming terminal output in real-time.
  */
 export function useTerminalStream(options: UseTerminalStreamOptions): UseTerminalStreamResult {
-  const { sessionId, onData, onExit, onResize, enabled = true } = options;
+  const { sessionId, onData, onExit, onResize, onClarification, enabled = true } = options;
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [lastMessage, setLastMessage] = useState<StreamMessage | null>(null);
@@ -51,41 +66,35 @@ export function useTerminalStream(options: UseTerminalStreamOptions): UseTermina
   sessionIdRef.current = sessionId;
 
   const startStream = useCallback(async () => {
-    if (typeof window === 'undefined' || !window.doorway) {
-      console.warn('[TerminalStream] window.doorway not available');
+    if (typeof window === 'undefined' || !window.doorway?.terminal) {
       return;
     }
 
     try {
-      const result = await window.doorway.terminal.startStream(sessionIdRef.current);
+      await window.doorway.terminal.startStream(sessionIdRef.current);
       setIsStreaming(true);
       setError(null);
-      console.log(
-        `[TerminalStream] Started streaming ${sessionIdRef.current.slice(0, 8)} (${result.bufferedCount} buffered)`
-      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      console.error('[TerminalStream] Failed to start stream:', err);
     }
   }, []);
 
   const stopStream = useCallback(async () => {
-    if (typeof window === 'undefined' || !window.doorway) {
+    if (typeof window === 'undefined' || !window.doorway?.terminal) {
       return;
     }
 
     try {
       await window.doorway.terminal.stopStream(sessionIdRef.current);
       setIsStreaming(false);
-      console.log(`[TerminalStream] Stopped streaming ${sessionIdRef.current.slice(0, 8)}`);
     } catch (err) {
-      console.error('[TerminalStream] Failed to stop stream:', err);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
   // Subscribe to stream messages
   useEffect(() => {
-    if (!enabled || typeof window === 'undefined' || !window.doorway) {
+    if (!enabled || typeof window === 'undefined' || !window.doorway?.terminal) {
       return;
     }
 
@@ -98,7 +107,7 @@ export function useTerminalStream(options: UseTerminalStreamOptions): UseTermina
 
       switch (message.type) {
         case 'data':
-          onData?.(message.data ?? '');
+          onData?.(message.data ?? '', message);
           break;
         case 'exit':
           onExit?.(message.exitCode ?? 0, message.signal ?? null);
@@ -112,6 +121,19 @@ export function useTerminalStream(options: UseTerminalStreamOptions): UseTermina
         case 'error':
           setError(message.error ?? 'Unknown error');
           break;
+        case 'clarification':
+          if (message.clarificationId && message.question) {
+            onClarification?.({
+              type: 'clarification',
+              sessionId: message.sessionId,
+              clarificationId: message.clarificationId,
+              question: message.question,
+              context: message.context,
+              suggestedResponses: message.suggestedResponses,
+              timestamp: message.timestamp,
+            });
+          }
+          break;
       }
     });
 
@@ -119,7 +141,7 @@ export function useTerminalStream(options: UseTerminalStreamOptions): UseTermina
       unsubscribe();
       void stopStream();
     };
-  }, [enabled, onData, onExit, onResize, startStream, stopStream]);
+  }, [enabled, onData, onExit, onResize, onClarification, startStream, stopStream]);
 
   return {
     isStreaming,
@@ -148,6 +170,7 @@ export interface TerminalStreamCallbacks {
   readonly onExit?: (exitCode: number, signal: string | null) => void;
   readonly onResize?: (cols: number, rows: number) => void;
   readonly onError?: (error: string) => void;
+  readonly onClarification?: (clarification: ClarificationMessage) => void;
 }
 
 export interface StreamStats {
@@ -165,7 +188,10 @@ const BUFFER_TTL_MS = 60000;
 export function createStreamManager(): StreamManager {
   const subscriptions = new Map<string, Set<TerminalStreamCallbacks>>();
   const unsubscribes = new Map<string, () => void>();
-  const stats = new Map<string, { messageCount: number; bytesReceived: number; lastTimestamp: string | null }>();
+  const stats = new Map<
+    string,
+    { messageCount: number; bytesReceived: number; lastTimestamp: string | null }
+  >();
   const messageBuffer = new Map<string, StreamMessage[]>();
 
   let globalUnsubscribe: (() => void) | null = null;
@@ -208,13 +234,26 @@ export function createStreamManager(): StreamManager {
           case 'error':
             cb.onError?.(message.error ?? 'Unknown error');
             break;
+          case 'clarification':
+            if (message.clarificationId && message.question) {
+              cb.onClarification?.({
+                type: 'clarification',
+                sessionId: message.sessionId,
+                clarificationId: message.clarificationId,
+                question: message.question,
+                context: message.context,
+                suggestedResponses: message.suggestedResponses,
+                timestamp: message.timestamp,
+              });
+            }
+            break;
         }
       }
     }
   }
 
   function initialize() {
-    if (isInitialized || typeof window === 'undefined' || !window.doorway) {
+    if (isInitialized || typeof window === 'undefined' || !window.doorway?.terminal) {
       return;
     }
 
@@ -230,7 +269,7 @@ export function createStreamManager(): StreamManager {
         subscriptions.set(sessionId, new Set());
 
         // Subscribe to IPC
-        if (typeof window !== 'undefined' && window.doorway) {
+        if (typeof window !== 'undefined' && window.doorway?.terminal) {
           void window.doorway.terminal.startStream(sessionId);
         }
       }
@@ -248,7 +287,7 @@ export function createStreamManager(): StreamManager {
             messageBuffer.delete(sessionId);
 
             // Unsubscribe from IPC
-            if (typeof window !== 'undefined' && window.doorway) {
+            if (typeof window !== 'undefined' && window.doorway?.terminal) {
               void window.doorway.terminal.stopStream(sessionId);
             }
           }
@@ -305,16 +344,37 @@ export function getStreamManager(): StreamManager {
 // Type augmentation for window.doorway
 // ============================================================================
 
+export interface FaultRecoveryAction {
+  readonly type: 'retry' | 'reprompt' | 'switch_model' | 'ask_user' | 'halt';
+  readonly reason: string;
+  readonly message?: string;
+  readonly delayMs?: number;
+}
+
+export interface ClarificationRequest {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly threadId: string;
+  readonly faultType: string;
+  readonly reason: string;
+  readonly message?: string;
+}
+
 declare global {
   interface Window {
     doorway: {
       terminal: {
-        startStream: (sessionId: string) => Promise<{ success: boolean; sessionId: string; bufferedCount: number }>;
+        startStream: (
+          sessionId: string
+        ) => Promise<{ success: boolean; sessionId: string; bufferedCount: number }>;
         stopStream: (sessionId: string) => Promise<{ success: boolean }>;
         getActiveStreams: () => Promise<{ sessionId: string; subscriptionCount: number }[]>;
         onStream: (callback: (message: StreamMessage) => void) => () => void;
       };
-      // ... other doorway APIs
+      faultRecovery: {
+        onAction: (callback: (action: FaultRecoveryAction) => void) => () => void;
+        onClarification: (callback: (request: ClarificationRequest) => void) => () => void;
+      };
     };
   }
 }

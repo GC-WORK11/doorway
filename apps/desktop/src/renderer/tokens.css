@@ -1,133 +1,170 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  /**
- * Doorway Design Tokens — Premium Dark IDE
- *
- * Inspired by T3 Code, Cursor 3, Codex Desktop.
- * Warm neutral palette, DM Sans typography, oklch accent.
- */
-
-  /* ============================================================================
-   Core Design Tokens
-   ============================================================================ */
+  /* ==========================================================================
+     Doorway Design Tokens — PRD Pillar Three Chat Interface
+     Light-first. Dark via [data-theme='dark'].
+     ========================================================================== */
 
   :root {
-    /* --- Neutral palette (warm dark, not cold blue) --- */
-    --dw-bg: #0a0a0b;
-    --dw-bg-elevated: #111113;
-    --dw-bg-soft: #18181b;
-    --dw-bg-glass: rgba(10, 10, 11, 0.82);
-    --dw-surface: #111113;
-    --dw-surface-muted: #1c1c1f;
-    --dw-surface-hover: rgba(255, 255, 255, 0.04);
-    --dw-surface-active: rgba(255, 255, 255, 0.07);
+    /* --- Backgrounds --- */
+    --bg-primary:     #F2F2F2;
+    --bg-secondary:   #FFFFFF;
+    --bg-tertiary:    #EBEBEB;
+    --bg-input:       #FFFFFF;
 
-    /* --- Borders (barely visible, warm) --- */
-    --dw-border: rgba(255, 255, 255, 0.06);
-    --dw-border-strong: rgba(255, 255, 255, 0.1);
+    /* --- Text --- */
+    --text-primary:   #111111;
+    --text-secondary: #666666;
+    --text-tertiary:  #999999;
+    --text-inverse:   #FFFFFF;
 
-    /* --- Text hierarchy --- */
-    --dw-text: #e4e4e7;
-    --dw-text-muted: #a1a1aa;
-    --dw-text-soft: #71717a;
-    --dw-text-faint: #3f3f46;
+    /* --- Borders --- */
+    --border-default: #E0E0E0;
+    --border-strong:  #CCCCCC;
 
-    /* --- Accent (soft violet, oklch-inspired) --- */
-    --dw-accent: #818cf8;
-    --dw-accent-soft: rgba(129, 140, 248, 0.1);
-    --dw-accent-border: rgba(129, 140, 248, 0.2);
+    /* --- Accent --- */
+    --accent:         #111111;
+    --accent-soft:    rgba(17, 17, 17, 0.06);
 
-    /* --- Semantic status --- */
-    --dw-success: #34d399;
-    --dw-success-soft: rgba(52, 211, 153, 0.1);
-    --dw-warning: #fbbf24;
-    --dw-warning-soft: rgba(251, 191, 36, 0.1);
-    --dw-danger: #f87171;
-    --dw-danger-soft: rgba(248, 113, 113, 0.1);
-    --dw-live: #34d399;
+    /* --- Status --- */
+    --success:        #34D399;
+    --warning:        #FBBF24;
+    --danger:         #EF4444;
 
-    /* --- Layout geometry (test-required) --- */
-    --dw-rail-width: 56px;
-    --dw-rail-gap: 8px;
-    --dw-sidebar-width: 284px;
-    --dw-composer-height: 132px;
+    /* --- Shadows --- */
+    --shadow-card:     0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.1);
 
     /* --- Typography --- */
-    --font-sans:
-      'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    --font-mono: 'Geist Mono', 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, monospace;
+    --font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
 
     /* --- Radius --- */
-    --radius: 0.625rem;
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
-    --radius-2xl: calc(var(--radius) + 8px);
-    --radius-panel: 14px;
-    --radius-card: 16px;
-    --radius-chip: 10px;
-    --radius-button-round: 999px;
-
-    /* --- Spacing --- */
-    --spacing-sidebar: 16px;
-    --spacing-panel-gap: 8px;
-    --spacing-landing-gap: 24px;
-    --spacing-composer: 24px;
+    --radius-sm:   6px;
+    --radius-md:   10px;
+    --radius-lg:   12px;
+    --radius-xl:   16px;
+    --radius-pill: 999px;
 
     /* --- Layout --- */
-    --sidebar-width-landing: 280px;
-    --sidebar-width-workspace: 260px;
-    --sidebar-width-collapsed: 64px;
-    --thread-panel-min: 360px;
-    --thread-panel-max: 470px;
-    --editor-min: 420px;
-    --surface-panel-min: 360px;
-    --surface-panel-max: 520px;
+    --sidebar-width: 260px;
 
-    /* --- Shadows (warm, subtle) --- */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45);
-  }
-
-  /* Optional light theme tokens */
-  [data-theme='light'] {
-    --dw-bg: #fafafa;
-    --dw-bg-elevated: #ffffff;
-    --dw-bg-soft: #f4f4f5;
-    --dw-bg-glass: rgba(255, 255, 255, 0.82);
-    --dw-surface: #ffffff;
-    --dw-surface-muted: #e4e4e7;
-    --dw-surface-hover: rgba(0, 0, 0, 0.03);
+    /* --- Legacy --dw-* aliases (keeps existing component CSS working) --- */
+    --dw-bg:             var(--bg-primary);
+    --dw-bg-elevated:    var(--bg-secondary);
+    --dw-bg-soft:        var(--bg-tertiary);
+    --dw-bg-glass:       rgba(242, 242, 242, 0.82);
+    --dw-surface:        var(--bg-secondary);
+    --dw-surface-muted:  var(--bg-tertiary);
+    --dw-surface-hover:  rgba(0, 0, 0, 0.03);
     --dw-surface-active: rgba(0, 0, 0, 0.06);
-    --dw-border: rgba(0, 0, 0, 0.08);
-    --dw-border-strong: rgba(0, 0, 0, 0.14);
-    --dw-text: #18181b;
-    --dw-text-muted: #52525b;
-    --dw-text-soft: #71717a;
-    --dw-text-faint: #a1a1aa;
-    --dw-accent: #6366f1;
-    --dw-accent-soft: rgba(99, 102, 241, 0.1);
-    --dw-accent-border: rgba(99, 102, 241, 0.2);
-    --dw-success: #10b981;
-    --dw-success-soft: rgba(16, 185, 129, 0.1);
-    --dw-warning: #f59e0b;
-    --dw-warning-soft: rgba(245, 158, 11, 0.1);
-    --dw-danger: #ef4444;
-    --dw-danger-soft: rgba(239, 68, 68, 0.1);
-    --dw-live: #10b981;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
-    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+
+    --dw-border:        var(--border-default);
+    --dw-border-strong: var(--border-strong);
+
+    --dw-text:       var(--text-primary);
+    --dw-text-muted: var(--text-secondary);
+    --dw-text-soft:  var(--text-tertiary);
+    --dw-text-faint: #CCCCCC;
+
+    --dw-accent:        var(--accent);
+    --dw-accent-soft:   var(--accent-soft);
+    --dw-accent-border: rgba(17, 17, 17, 0.12);
+
+    --dw-success:      var(--success);
+    --dw-success-soft: rgba(52, 211, 153, 0.1);
+    --dw-warning:      var(--warning);
+    --dw-warning-soft: rgba(251, 191, 36, 0.1);
+    --dw-danger:       var(--danger);
+    --dw-danger-soft:  rgba(239, 68, 68, 0.1);
+    --dw-live:         var(--success);
+
+    --dw-rail-width:      56px;
+    --dw-rail-gap:        8px;
+    --dw-sidebar-width:   var(--sidebar-width);
+    --dw-composer-height: 132px;
   }
 
-  /* ============================================================================
-   Scrollbar — thin, near-invisible (6px like T3 Code)
-   ============================================================================ */
+  /* ==========================================================================
+     Light theme (explicit override — mirrors :root)
+     ========================================================================== */
+
+  [data-theme='light'] {
+    --bg-primary:     #F2F2F2;
+    --bg-secondary:   #FFFFFF;
+    --bg-tertiary:    #EBEBEB;
+    --bg-input:       #FFFFFF;
+
+    --text-primary:   #111111;
+    --text-secondary: #666666;
+    --text-tertiary:  #999999;
+    --text-inverse:   #FFFFFF;
+
+    --border-default: #E0E0E0;
+    --border-strong:  #CCCCCC;
+
+    --accent:         #111111;
+    --accent-soft:    rgba(17, 17, 17, 0.06);
+
+    --success:        #34D399;
+    --warning:        #FBBF24;
+    --danger:         #EF4444;
+
+    --shadow-card:     0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.1);
+
+    --dw-bg-glass:       rgba(242, 242, 242, 0.82);
+    --dw-surface-hover:  rgba(0, 0, 0, 0.03);
+    --dw-surface-active: rgba(0, 0, 0, 0.06);
+    --dw-text-faint:     #CCCCCC;
+    --dw-accent-border:  rgba(17, 17, 17, 0.12);
+  }
+
+  /* ==========================================================================
+     Dark theme
+     ========================================================================== */
+
+  [data-theme='dark'] {
+    --bg-primary:     #111111;
+    --bg-secondary:   #1A1A1A;
+    --bg-tertiary:    #252525;
+    --bg-input:       #1A1A1A;
+
+    --text-primary:   #E4E4E7;
+    --text-secondary: #A1A1AA;
+    --text-tertiary:  #71717A;
+    --text-inverse:   #111111;
+
+    --border-default: #2A2A2A;
+    --border-strong:  #3F3F46;
+
+    --accent:         #E4E4E7;
+    --accent-soft:    rgba(228, 228, 231, 0.08);
+
+    --success:        #34D399;
+    --warning:        #FBBF24;
+    --danger:         #F87171;
+
+    --shadow-card:     0 2px 8px rgba(0, 0, 0, 0.25);
+    --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+    --dw-bg-glass:       rgba(17, 17, 17, 0.82);
+    --dw-surface-hover:  rgba(255, 255, 255, 0.04);
+    --dw-surface-active: rgba(255, 255, 255, 0.07);
+    --dw-text-faint:     #3F3F46;
+    --dw-accent-border:  rgba(228, 228, 231, 0.15);
+    --dw-danger:         #F87171;
+    --dw-danger-soft:    rgba(248, 113, 113, 0.1);
+  }
+
+  /* ==========================================================================
+     Scrollbar — thin, near-invisible (6 px)
+     ========================================================================== */
 
   ::-webkit-scrollbar {
     width: 6px;
@@ -139,21 +176,29 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.08);
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  [data-theme='dark'] ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  [data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.15);
   }
 
-  /* ============================================================================
-   Selection & Focus
-   ============================================================================ */
+  /* ==========================================================================
+     Selection & Focus
+     ========================================================================== */
 
   ::selection {
-    background: var(--dw-accent);
-    color: white;
+    background: var(--accent);
+    color: var(--text-inverse);
   }
 
   :focus-visible {
@@ -169,29 +214,12 @@
   textarea:focus-visible,
   select:focus-visible {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: var(--border-strong);
   }
 
-  /* ============================================================================
-   Noise Texture — subtle depth (inspired by T3 Code)
-   ============================================================================ */
-
-  /* Subtle noise overlay for premium depth */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 9999;
-    opacity: 0.025;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-    background-repeat: repeat;
-    background-size: 128px 128px;
-  }
-
-  /* ============================================================================
-   Reduced Motion
-   ============================================================================ */
+  /* ==========================================================================
+     Reduced Motion
+     ========================================================================== */
 
   @media (prefers-reduced-motion: reduce) {
     *,

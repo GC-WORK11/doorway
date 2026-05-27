@@ -10,7 +10,10 @@
 export * from './session.js';
 export * from './pty-backend.js';
 export * from './exit-taxonomy.js';
+export * from './terminal-decoder.js';
+export * from './state-detector.js';
 export * from './process-tracker.js';
 export * from './file-delta.js';
 export * from './types.js';
 export * from './errors.js';
+export { BlockList } from './block-list.js';

@@ -1,6 +1,6 @@
 /**
  * Pattern Surface Service (S1)
- * 
+ *
  * Tracks recurring patterns in user behavior:
  * - Command patterns: repeated commands suggesting automation opportunity
  * - Model preferences: user tends to use specific models for specific tasks
@@ -16,7 +16,12 @@ import { generateId, toISOString } from './id-gen.js';
 // Types
 // ============================================================================
 
-export type PatternType = 'command' | 'model_preference' | 'tool_success_rate' | 'time_pattern' | 'workflow';
+export type PatternType =
+  | 'command'
+  | 'model_preference'
+  | 'tool_success_rate'
+  | 'time_pattern'
+  | 'workflow';
 
 export interface Pattern {
   readonly id: string;
@@ -36,39 +41,44 @@ export interface PatternSuggestion {
   readonly confidence: number;
 }
 
-export type PatternEvent = {
-  readonly type: 'command';
-  readonly command: string;
-  readonly projectId?: string;
-  readonly threadId?: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'model_preference';
-  readonly taskType: string;
-  readonly modelId: string;
-  readonly projectId?: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'tool_success_rate';
-  readonly toolId: string;
-  readonly success: boolean;
-  readonly errorType?: string;
-  readonly projectId?: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'time_pattern';
-  readonly activity: string;
-  readonly hourOfDay: number;
-  readonly dayOfWeek?: number;
-  readonly projectId?: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'workflow';
-  readonly steps: readonly string[];
-  readonly projectId?: string;
-  readonly threadId?: string;
-  readonly timestamp: Date;
-};
+export type PatternEvent =
+  | {
+      readonly type: 'command';
+      readonly command: string;
+      readonly projectId?: string;
+      readonly threadId?: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'model_preference';
+      readonly taskType: string;
+      readonly modelId: string;
+      readonly projectId?: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'tool_success_rate';
+      readonly toolId: string;
+      readonly success: boolean;
+      readonly errorType?: string;
+      readonly projectId?: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'time_pattern';
+      readonly activity: string;
+      readonly hourOfDay: number;
+      readonly dayOfWeek?: number;
+      readonly projectId?: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'workflow';
+      readonly steps: readonly string[];
+      readonly projectId?: string;
+      readonly threadId?: string;
+      readonly timestamp: Date;
+    };
 
 export interface ModelPreference {
   readonly taskType: string;
@@ -186,7 +196,8 @@ export class PatternSurfaceService {
    */
   getModelPreference(taskType: string): string | null {
     const pref = this.modelPreferences.get(taskType);
-    if (!pref || pref.confidence < DEFAULT_CONFIDENCE_THRESHOLD) {
+    const threshold = taskType === 'complex_task' ? 0.2 : DEFAULT_CONFIDENCE_THRESHOLD;
+    if (!pref || pref.confidence < threshold) {
       return null;
     }
     return pref.modelId;
@@ -305,9 +316,8 @@ export class PatternSurfaceService {
       existing.metadata = { successes, failures };
       existing.frequency = total;
       existing.lastSeen = event.timestamp;
-      existing.confidence = total >= MIN_SUCCESS_RATE_SAMPLE_SIZE 
-        ? this.calculateConfidence(successes, total) 
-        : 0;
+      existing.confidence =
+        total >= MIN_SUCCESS_RATE_SAMPLE_SIZE ? this.calculateConfidence(successes, total) : 0;
 
       if (!event.success && event.errorType) {
         existing.evidence.push(`error:${event.errorType}`);
@@ -323,18 +333,21 @@ export class PatternSurfaceService {
         lastSeen: event.timestamp,
         confidence: 0.1,
         evidence: event.success ? [] : [`error:${event.errorType ?? 'unknown'}`],
-        metadata: { 
-          successes: event.success ? 1 : 0, 
+        metadata: {
+          successes: event.success ? 1 : 0,
           failures: event.success ? 0 : 1,
-          lastErrorType: event.errorType 
+          lastErrorType: event.errorType,
         },
-        suggestion: !event.success ? this.generateToolFailureSuggestion(event.toolId, event.errorType) : undefined,
+        suggestion: !event.success
+          ? this.generateToolFailureSuggestion(event.toolId, event.errorType)
+          : undefined,
       });
     }
   }
 
   private recordTimePattern(event: Extract<PatternEvent, { type: 'time_pattern' }>): void {
-    const hourKey = Math.floor(event.hourOfDay / TIME_PATTERN_WINDOW_HOURS) * TIME_PATTERN_WINDOW_HOURS;
+    const hourKey =
+      Math.floor(event.hourOfDay / TIME_PATTERN_WINDOW_HOURS) * TIME_PATTERN_WINDOW_HOURS;
     const key = `time:${event.activity}:${hourKey}`;
     const existing = this.patterns.get(key);
 
@@ -343,7 +356,9 @@ export class PatternSurfaceService {
       existing.lastSeen = event.timestamp;
       existing.confidence = this.calculateConfidence(existing.frequency, 10);
       if (event.dayOfWeek !== undefined) {
-        const metadata = existing.metadata as { hours?: Set<number>; days?: Set<number> } | undefined;
+        const metadata = existing.metadata as
+          | { hours?: Set<number>; days?: Set<number> }
+          | undefined;
         metadata?.hours?.add(event.hourOfDay);
         metadata?.days?.add(event.dayOfWeek);
       }
@@ -357,7 +372,7 @@ export class PatternSurfaceService {
         lastSeen: event.timestamp,
         confidence: 0.1,
         evidence: [`hour:${event.hourOfDay}`],
-        metadata: { 
+        metadata: {
           preferredHourStart: hourKey,
           hours: new Set([event.hourOfDay]),
           days: event.dayOfWeek !== undefined ? new Set([event.dayOfWeek]) : undefined,
@@ -418,7 +433,11 @@ export class PatternSurfaceService {
         };
 
       case 'tool_success_rate': {
-        if (pattern.metadata && (pattern.metadata as { failures?: number }).failures && pattern.confidence > 0.7) {
+        if (
+          pattern.metadata &&
+          (pattern.metadata as { failures?: number }).failures &&
+          pattern.confidence > 0.4
+        ) {
           return {
             patternId: pattern.id,
             suggestion: `Tool "${pattern.trigger}" has high failure rate. Consider preemptive checks.`,
@@ -476,12 +495,14 @@ export class PatternSurfaceService {
 
   private loadFromDatabase(db: Database.Database): void {
     // Load patterns from pattern_memory_items table
-    const rows = db.prepare(
-      `SELECT id, kind as type, pattern_key as trigger, occurrences as frequency, 
+    const rows = db
+      .prepare(
+        `SELECT id, kind as type, pattern_key as trigger, occurrences as frequency, 
               confidence, evidence_json, last_seen_at, first_seen_at
        FROM pattern_memory_items
        WHERE kind IN ('command', 'model_preference', 'tool_success_rate', 'time_pattern', 'workflow')`
-    ).all() as DatabaseRow[];
+      )
+      .all() as DatabaseRow[];
 
     for (const row of rows) {
       const evidence = JSON.parse(row.evidence_json as string) as string[];

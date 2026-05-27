@@ -75,6 +75,19 @@ export interface ThreadReplayVerificationResult {
   readonly threadIds: readonly ThreadId[];
 }
 
+export interface RendererClarificationPayload {
+  readonly clarificationId: string;
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly threadId: string;
+  readonly question: string;
+  readonly context: string;
+  readonly suggestedResponses?: readonly string[];
+  readonly faultType: 'clarification_request';
+  readonly reason: string;
+  readonly message: string;
+}
+
 // ============================================================================
 // Thread Utilities
 // ============================================================================
@@ -532,6 +545,29 @@ export function handoffUsageEventPayload(req: {
   };
 }
 
+export function clarificationRendererPayload(request: {
+  readonly id: string;
+  readonly runId: AgentRunId;
+  readonly sessionId: TerminalSessionId;
+  readonly threadId: ThreadId;
+  readonly question: string;
+  readonly context: string;
+  readonly suggestedResponses?: readonly string[];
+}): RendererClarificationPayload {
+  return {
+    clarificationId: request.id,
+    runId: request.runId,
+    sessionId: request.sessionId,
+    threadId: request.threadId,
+    question: request.question,
+    context: request.context,
+    ...(request.suggestedResponses ? { suggestedResponses: request.suggestedResponses } : {}),
+    faultType: 'clarification_request',
+    reason: 'Terminal output requested user input.',
+    message: request.question,
+  };
+}
+
 // ============================================================================
 // Internal Helpers
 // ============================================================================
@@ -543,7 +579,11 @@ function handoffEventsForRun(
   const rows = db
     .prepare(
       `
-      SELECT chunks.text, chunks.is_stdout, chunks.is_stderr, chunks.created_at
+      SELECT
+        COALESCE(chunks.clean_text, chunks.text) AS text,
+        chunks.is_stdout,
+        chunks.is_stderr,
+        chunks.created_at
       FROM agent_runs runs
       JOIN terminal_chunks chunks ON chunks.session_id = runs.terminal_session_id
       WHERE runs.id = ?

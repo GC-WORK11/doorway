@@ -1,6 +1,10 @@
 import React, { useRef, useEffect } from 'react';
 import type { AgentLaunchMode } from '@doorway/protocol';
-import { ProjectInstructionStatus, type ComposerLaunchPreflight, type ComposerMentionTarget } from './shared-ui';
+import {
+  ProjectInstructionStatus,
+  type ComposerLaunchPreflight,
+  type ComposerMentionTarget,
+} from './shared-ui';
 import { CommandPalette } from './CommandPalette';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -90,7 +94,6 @@ export function ComposerDock() {
 
       {/* Main Composer Box */}
       <div className="relative flex flex-col bg-[#0a0a0b]/80 backdrop-blur-2xl rounded-2xl border border-white/[0.08] shadow-[0_16px_32px_rgba(0,0,0,0.6),inset_0_1px_0_0_rgba(255,255,255,0.05)] focus-within:border-white/[0.15] focus-within:shadow-[0_16px_32px_rgba(0,0,0,0.6),inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_0_1px_rgba(255,255,255,0.05)] transition-all duration-300">
-        
         {/* Mentions Dropdown */}
         <AnimatePresence>
           {activeMentionTargets.length > 0 && (
@@ -125,7 +128,15 @@ export function ComposerDock() {
             className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white/90 hover:bg-white/5 transition-colors"
             aria-label="Open command menu"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
               <line x1="4" y1="9" x2="20" y2="9" />
               <line x1="4" y1="15" x2="20" y2="15" />
             </svg>
@@ -150,7 +161,15 @@ export function ComposerDock() {
             title={isComposerBlocked ? launchPreflight.reason : 'Send message'}
             className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white/90 hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/40 transition-colors"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>

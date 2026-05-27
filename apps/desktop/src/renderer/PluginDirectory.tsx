@@ -109,9 +109,7 @@ function PluginCard({
       {plugin.capabilities.includes('mcp') && (
         <div className="plugin-card__mcp">
           <span className="plugin-card__mcp-label">MCP Server:</span>
-          <span className="plugin-card__mcp-status plugin-card__mcp-status--ready">
-            Available
-          </span>
+          <span className="plugin-card__mcp-status plugin-card__mcp-status--ready">Available</span>
         </div>
       )}
 
@@ -124,9 +122,7 @@ function PluginCard({
         >
           Details
         </button>
-        {plugin.entryCommand && (
-          <span className="plugin-card__entry">{plugin.entryCommand}</span>
-        )}
+        {plugin.entryCommand && <span className="plugin-card__entry">{plugin.entryCommand}</span>}
       </footer>
     </motion.article>
   );

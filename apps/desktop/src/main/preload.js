@@ -9,10 +9,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Define the API
 const doorwayAPI = {
   // Project operations
+  selectProjectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   openProject: (req) => ipcRenderer.invoke('project:open', req),
   listProjects: () => ipcRenderer.invoke('project:list'),
   listProjectMemorySources: (req) => ipcRenderer.invoke('project:memory-sources', req),
   listProjectPlugins: (req) => ipcRenderer.invoke('project:list-plugins', req),
+  listProjectFiles: (path) => ipcRenderer.invoke('project:list-files', { path }),
 
   // Thread operations
   createThread: (req) => ipcRenderer.invoke('thread:create', req),
@@ -68,6 +70,8 @@ const doorwayAPI = {
   stopTerminal: (sessionId) => ipcRenderer.invoke('terminal:stop', { sessionId }),
   getTerminalTranscript: (sessionId) =>
     ipcRenderer.invoke('terminal:get-transcript', { sessionId }),
+  getTerminalBlocks: (sessionId) =>
+    ipcRenderer.invoke('terminal:get-blocks', { sessionId }),
   getTerminalInputs: (sessionId) => ipcRenderer.invoke('terminal:get-inputs', { sessionId }),
   listTerminals: (threadId) => ipcRenderer.invoke('terminal:list', { threadId }),
 
@@ -128,6 +132,31 @@ const doorwayAPI = {
       return () => ipcRenderer.removeListener('terminal:stream', handler);
     },
   },
+
+  // Fault Recovery - auto-retry and crash detection
+  faultRecovery: {
+    onAction: (callback) => {
+      const handler = (event, payload) => callback(payload);
+      ipcRenderer.on('fault-recovery:action', handler);
+      return () => ipcRenderer.removeListener('fault-recovery:action', handler);
+    },
+    onClarification: (callback) => {
+      const handler = (event, payload) => callback(payload);
+      ipcRenderer.on('fault-recovery:clarification', handler);
+      return () => ipcRenderer.removeListener('fault-recovery:clarification', handler);
+    },
+  },
+
+  // Clarification
+  clarification: {
+    answer: (req) => ipcRenderer.invoke('clarification:answer', req),
+    get: (clarificationId) => ipcRenderer.invoke('clarification:get', { clarificationId }),
+    pending: (sessionId) => ipcRenderer.invoke('clarification:pending', { sessionId }),
+  },
+
+  // YC Pitch Demo specific operations
+  writeDemoGame: (projectPath) => ipcRenderer.invoke('project:write-demo-game', { projectPath }),
+  openSystemBrowser: (url) => ipcRenderer.invoke('project:open-system-browser', { url }),
 };
 
 // Expose to renderer

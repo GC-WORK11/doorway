@@ -1,6 +1,6 @@
 /**
  * Automation Suggestion Engine (S3)
- * 
+ *
  * Analyzes patterns and session reviews to surface automation candidates:
  * - Pipeline automations: sequences of commands run together repeatedly
  * - Scheduled automations: time-based patterns suggesting scheduled tasks
@@ -90,11 +90,11 @@ export class AutomationSuggestionEngine {
     const reviews = this.sessionService.getSessionReviews();
     const suggestions = this.generateAutomationSuggestions(patterns, reviews);
 
-    const highPriority = suggestions.filter(s => s.confidence >= CONFIDENCE_THRESHOLD_HIGH);
-    const mediumPriority = suggestions.filter(s => 
-      s.confidence >= CONFIDENCE_THRESHOLD_MEDIUM && s.confidence < CONFIDENCE_THRESHOLD_HIGH
+    const highPriority = suggestions.filter((s) => s.confidence >= CONFIDENCE_THRESHOLD_HIGH);
+    const mediumPriority = suggestions.filter(
+      (s) => s.confidence >= CONFIDENCE_THRESHOLD_MEDIUM && s.confidence < CONFIDENCE_THRESHOLD_HIGH
     );
-    const lowPriority = suggestions.filter(s => s.confidence < CONFIDENCE_THRESHOLD_MEDIUM);
+    const lowPriority = suggestions.filter((s) => s.confidence < CONFIDENCE_THRESHOLD_MEDIUM);
 
     return {
       suggestions,
@@ -113,7 +113,7 @@ export class AutomationSuggestionEngine {
    */
   private generatePipelineSuggestions(patterns: readonly Pattern[]): AutomationSuggestion[] {
     const suggestions: AutomationSuggestion[] = [];
-    const workflowPatterns = patterns.filter(p => p.type === 'workflow' && p.confidence >= 0.5);
+    const workflowPatterns = patterns.filter((p) => p.type === 'workflow' && p.confidence >= 0.3);
 
     for (const pattern of workflowPatterns) {
       if (pattern.frequency < PIPELINE_SEQUENCE_MIN_OCCURRENCES) {
@@ -146,7 +146,7 @@ export class AutomationSuggestionEngine {
    */
   private generateScheduledSuggestions(patterns: readonly Pattern[]): AutomationSuggestion[] {
     const suggestions: AutomationSuggestion[] = [];
-    const timePatterns = patterns.filter(p => p.type === 'time_pattern' && p.confidence >= 0.6);
+    const timePatterns = patterns.filter((p) => p.type === 'time_pattern' && p.confidence >= 0.3);
 
     for (const pattern of timePatterns) {
       if (pattern.frequency < SCHEDULED_ACTIVITY_MIN_FREQUENCY) {
@@ -205,7 +205,7 @@ export class AutomationSuggestionEngine {
    */
   private generateWorkflowSuggestions(patterns: readonly Pattern[]): AutomationSuggestion[] {
     const suggestions: AutomationSuggestion[] = [];
-    const commandPatterns = patterns.filter(p => p.type === 'command' && p.frequency >= 5);
+    const commandPatterns = patterns.filter((p) => p.type === 'command' && p.frequency >= 5);
 
     // Look for commands that frequently follow each other
     const sequences = this.findCommandSequences(commandPatterns);
@@ -233,7 +233,8 @@ export class AutomationSuggestionEngine {
   private analyzeFailurePatterns(
     reviews: readonly SessionReview[]
   ): { taskType: string; count: number; rate: number; patternIds: string[] }[] {
-    const taskStats: Map<string, { total: number; failures: number; patternIds: Set<string> }> = new Map();
+    const taskStats: Map<string, { total: number; failures: number; patternIds: Set<string> }> =
+      new Map();
 
     for (const review of reviews) {
       for (const task of review.tasks) {
@@ -271,10 +272,16 @@ export class AutomationSuggestionEngine {
   private findCommandSequences(
     commandPatterns: readonly Pattern[]
   ): { commands: string[]; frequency: number; confidence: number; patternIds: string[] }[] {
-    const sequences: { commands: string[]; frequency: number; confidence: number; patternIds: string[] }[] = [];
+    const sequences: {
+      commands: string[];
+      frequency: number;
+      confidence: number;
+      patternIds: string[];
+    }[] = [];
 
     // Group commands by thread/context using evidence
-    const evidenceMap: Map<string, { command: string; patternId: string; frequency: number }[]> = new Map();
+    const evidenceMap: Map<string, { command: string; patternId: string; frequency: number }[]> =
+      new Map();
 
     for (const pattern of commandPatterns) {
       for (const evidence of pattern.evidence) {
@@ -322,9 +329,12 @@ export class AutomationSuggestionEngine {
   /**
    * Generate preemptive action recommendation
    */
-  private generatePreemptiveAction(
-    failure: { taskType: string; count: number; rate: number; patternIds: string[] }
-  ): string {
+  private generatePreemptiveAction(failure: {
+    taskType: string;
+    count: number;
+    rate: number;
+    patternIds: string[];
+  }): string {
     if (failure.rate > 0.9) {
       return `Block this task by default and require user confirmation before proceeding.`;
     }
@@ -350,7 +360,7 @@ export class AutomationSuggestionEngine {
    * Parse time evidence from pattern
    */
   private parseTimeEvidence(pattern: Pattern): { hour: number } | null {
-    const hourEvidence = pattern.evidence.find(e => e.startsWith('hour:'));
+    const hourEvidence = pattern.evidence.find((e) => e.startsWith('hour:'));
     if (!hourEvidence) {
       return null;
     }
@@ -371,9 +381,7 @@ export class AutomationSuggestionEngine {
   /**
    * Deduplicate suggestions and sort by confidence
    */
-  private deduplicateAndSort(
-    suggestions: AutomationSuggestion[]
-  ): AutomationSuggestion[] {
+  private deduplicateAndSort(suggestions: AutomationSuggestion[]): AutomationSuggestion[] {
     const seen = new Set<string>();
     const unique: AutomationSuggestion[] = [];
 

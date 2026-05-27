@@ -175,8 +175,57 @@ export interface TranscriptChunk {
   readonly sequence: number;
   readonly timestamp: Date;
   readonly text: string;
+  readonly rawText?: string;
+  readonly cleanText?: string;
+  readonly controlEvents?: readonly TerminalControlEvent[];
+  readonly screenSnapshot?: TerminalScreenSnapshot;
+  readonly stateDetection?: TerminalStateDetection;
   readonly isStdout: boolean;
   readonly isStderr: boolean;
+}
+
+export type TerminalControlEvent =
+  | { readonly type: 'csi'; readonly sequence: string; readonly final: string }
+  | { readonly type: 'osc'; readonly sequence: string }
+  | { readonly type: 'dcs'; readonly sequence: string }
+  | { readonly type: 'escape'; readonly sequence: string }
+  | { readonly type: 'erase_line'; readonly sequence: string }
+  | { readonly type: 'erase_display'; readonly sequence: string }
+  | {
+      readonly type: 'screen_buffer';
+      readonly sequence: string;
+      readonly buffer: 'main' | 'alternate';
+      readonly active: boolean;
+    }
+  | { readonly type: 'carriage_return' }
+  | { readonly type: 'newline' }
+  | { readonly type: 'bell' };
+
+export interface TerminalScreenSnapshot {
+  readonly buffer: 'main' | 'alternate';
+  readonly cursorRow: number;
+  readonly cursorCol: number;
+  readonly visibleText: string;
+  readonly alternateText?: string;
+}
+
+export type TerminalSemanticState =
+  | 'unknown'
+  | 'awaiting_input'
+  | 'thinking'
+  | 'outputting'
+  | 'complete'
+  | 'stuck'
+  | 'failed';
+
+export interface TerminalStateDetection {
+  readonly state: TerminalSemanticState;
+  readonly provider: 'claude' | 'codex' | 'generic';
+  readonly confidence: number;
+  readonly reason: string;
+  readonly signals: readonly string[];
+  readonly confirmed?: boolean;
+  readonly confirmationSignals?: readonly string[];
 }
 
 export type TerminalExitKind =
@@ -287,6 +336,7 @@ export type EventType =
   | 'terminal.started'
   | 'terminal.input'
   | 'terminal.output'
+  | 'terminal.state'
   | 'terminal.stopped'
   | 'process.snapshot_captured'
   | 'process.snapshot_failed'
@@ -294,6 +344,8 @@ export type EventType =
   | 'terminal.file_delta_failed'
   | 'agent.attention'
   | 'completion.confidence_updated'
+  | 'clarification.requested'
+  | 'clarification.answered'
   | 'test.started'
   | 'test.finished'
   | 'diff.updated'
@@ -312,7 +364,12 @@ export type EventType =
   | 'merge.completed'
   | 'merge.conflict'
   | 'browser.action'
-  | 'browser.bundle_exported';
+  | 'browser.bundle_exported'
+  | 'unified_thread.session_created'
+  | 'unified_thread.agents_registered'
+  | 'unified_thread.agent_started'
+  | 'unified_thread.completed'
+  | 'unified_thread.synthesis_created';
 
 export interface DoorwayEvent {
   readonly id: EventId;
@@ -338,6 +395,7 @@ export type EventPayload =
   | TerminalStartedPayload
   | TerminalInputPayload
   | TerminalOutputPayload
+  | TerminalStatePayload
   | TerminalStoppedPayload
   | ProcessSnapshotCapturedPayload
   | ProcessSnapshotFailedPayload
@@ -345,6 +403,8 @@ export type EventPayload =
   | TerminalFileDeltaFailedPayload
   | AgentAttentionPayload
   | CompletionConfidenceUpdatedPayload
+  | ClarificationRequestedPayload
+  | ClarificationAnsweredPayload
   | TestStartedPayload
   | TestFinishedPayload
   | DiffUpdatedPayload
@@ -362,7 +422,12 @@ export type EventPayload =
   | MergeEvaluatedPayload
   | MergeCompletedPayload
   | MergeConflictPayload
-  | BrowserBundleExportedPayload;
+  | BrowserBundleExportedPayload
+  | UnifiedThreadSessionCreatedPayload
+  | UnifiedThreadAgentsRegisteredPayload
+  | UnifiedThreadAgentStartedPayload
+  | UnifiedThreadCompletedPayload
+  | UnifiedThreadSynthesisCreatedPayload;
 
 export interface ThreadCreatedPayload {
   readonly threadId: ThreadId;
@@ -533,6 +598,16 @@ export interface TerminalStartedPayload {
 
 export type TerminalInputSource = 'user' | 'permission_decision' | 'doorway';
 
+export const TERMINAL_ENTER = '\r';
+
+export function terminalSubmitInput(text: string): string {
+  return `${text}${TERMINAL_ENTER}`;
+}
+
+export function terminalSubmitLines(lines: readonly string[]): string {
+  return lines.map((line) => terminalSubmitInput(line)).join('');
+}
+
 export interface TerminalInputPayload {
   readonly sessionId: TerminalSessionId;
   readonly sequence: number;
@@ -544,8 +619,21 @@ export interface TerminalOutputPayload {
   readonly sessionId: TerminalSessionId;
   readonly sequence: number;
   readonly text: string;
+  readonly rawText?: string;
+  readonly cleanText?: string;
+  readonly controlEvents?: readonly TerminalControlEvent[];
+  readonly screenSnapshot?: TerminalScreenSnapshot;
+  readonly stateDetection?: TerminalStateDetection;
   readonly isStdout: boolean;
   readonly isStderr: boolean;
+}
+
+export interface TerminalStatePayload {
+  readonly sessionId: TerminalSessionId;
+  readonly agentRunId?: AgentRunId;
+  readonly detection: TerminalStateDetection;
+  readonly source: 'terminal_output' | 'silence_confirmation' | 'process_exit';
+  readonly outputPreview?: string;
 }
 
 export interface TerminalStoppedPayload {
@@ -618,6 +706,26 @@ export interface CompletionConfidenceUpdatedPayload {
   readonly score: number;
   readonly recommendedState: CompletionRecommendedState;
   readonly signals: readonly string[];
+}
+
+export interface ClarificationRequestedPayload {
+  readonly clarificationId: string;
+  readonly threadId: ThreadId;
+  readonly runId: AgentRunId;
+  readonly sessionId: TerminalSessionId;
+  readonly question: string;
+  readonly context: string;
+  readonly suggestedResponses?: readonly string[];
+  readonly requestedAt: string;
+}
+
+export interface ClarificationAnsweredPayload {
+  readonly clarificationId: string;
+  readonly threadId: ThreadId;
+  readonly runId: AgentRunId;
+  readonly sessionId: TerminalSessionId;
+  readonly answer: string;
+  readonly answeredAt: string;
 }
 
 export interface TestStartedPayload {
@@ -740,6 +848,41 @@ export interface MergeConflictPayload {
   readonly taskId: TaskId;
   readonly file: string;
   readonly conflictDetails: string;
+}
+
+// ============================================================================
+// Unified Thread Payloads
+// ============================================================================
+
+export interface UnifiedThreadSessionCreatedPayload {
+  readonly sessionId: string;
+  readonly threadId: ThreadId;
+  readonly goal: string;
+  readonly mode: 'parallel' | 'sequential';
+}
+
+export interface UnifiedThreadAgentsRegisteredPayload {
+  readonly sessionId: string;
+  readonly agentIds: readonly string[];
+  readonly agentCount: number;
+}
+
+export interface UnifiedThreadAgentStartedPayload {
+  readonly sessionId: string;
+  readonly agentId: string;
+  readonly displayName: string;
+}
+
+export interface UnifiedThreadCompletedPayload {
+  readonly sessionId: string;
+  readonly status: 'completed' | 'partial';
+  readonly synthesisCreated: boolean;
+}
+
+export interface UnifiedThreadSynthesisCreatedPayload {
+  readonly sessionId: string;
+  readonly summary: string;
+  readonly agentCount: number;
 }
 
 export type FileChangeType = 'created' | 'modified' | 'deleted' | 'renamed';

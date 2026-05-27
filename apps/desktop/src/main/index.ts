@@ -21,7 +21,7 @@ function createWindow(): void {
     minWidth: 1000,
     minHeight: 600,
     title: 'Doorway',
-    backgroundColor: '#050607',
+    backgroundColor: '#F2F2F2',
     autoHideMenuBar: !devServerEnabled,
     show: false,
     webPreferences: {
@@ -54,12 +54,11 @@ function createWindow(): void {
   console.log('[Main] Window created');
 }
 
-// Setup IPC handlers - imported dynamically to avoid build issues
+import { setupMainHandlers, setMainWindow } from './handlers/index.js';
+
+// Setup IPC handlers
 async function setupHandlers() {
   try {
-    // Dynamic import for handlers
-    const { setupMainHandlers } = await import('./handlers/index.js');
-
     // Ensure .doorway directory exists
     const dataDir = join(app.getPath('userData'), '.doorway');
     if (!existsSync(dataDir)) {
@@ -77,7 +76,6 @@ app.whenReady().then(async () => {
   await setupHandlers();
   createWindow();
   if (mainWindow) {
-    const { setMainWindow } = await import('./handlers/index.js');
     setMainWindow(mainWindow);
   }
 

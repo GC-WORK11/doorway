@@ -91,13 +91,17 @@ describe('McpConnector', () => {
       const connectPromise = connector.connect(5000);
 
       // Wait for process to be spawned and emit initialized
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Simulate receiving the initialized notification
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }) + '\n'));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }) + '\n'
+        )
+      );
 
       await connectPromise;
 
@@ -116,7 +120,7 @@ describe('McpConnector', () => {
       const connector = new McpConnector(createMockOptions(server));
 
       connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Should return early on second call
       await expect(connector.connect(5000)).resolves.toBeUndefined();
@@ -130,11 +134,15 @@ describe('McpConnector', () => {
 
       // Connect first
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }) + '\n'));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }) + '\n'
+        )
+      );
       await connectPromise;
 
       expect(connector.isConnected).toBe(true);
@@ -166,11 +174,15 @@ describe('McpConnector', () => {
       connector.on('connected', connectedHandler);
 
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }) + '\n'));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }) + '\n'
+        )
+      );
 
       await connectPromise;
 
@@ -186,11 +198,15 @@ describe('McpConnector', () => {
 
       // Connect first
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }) + '\n'));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }) + '\n'
+        )
+      );
       await connectPromise;
 
       // Disconnect
@@ -207,11 +223,14 @@ describe('McpConnector', () => {
       connector.on('error', errorHandler);
 
       // Start connection (which spawns process)
-      connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      const connectPromise = connector.connect(5000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Simulate process error
       mockProcess._errorCallback?.(new Error('Process error'));
+
+      // Assert rejection to prevent unhandled rejection
+      await expect(connectPromise).rejects.toThrow('Process error');
 
       expect(errorHandler).toHaveBeenCalledTimes(1);
       expect(errorHandler).toHaveBeenCalledWith(expect.any(Error));
@@ -226,13 +245,17 @@ describe('McpConnector', () => {
 
       // Connect
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Simulate tools/list_changed notification
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'tools/list_changed',
-      }) + '\n'));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'tools/list_changed',
+          }) + '\n'
+        )
+      );
 
       await connectPromise;
 
@@ -249,24 +272,32 @@ describe('McpConnector', () => {
 
       // Manually trigger a request/response cycle
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Simulate initialize response
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        result: {
-          protocolVersion: '2024-11-05',
-          capabilities: { tools: {} },
-          serverInfo: { name: 'Test', version: '1.0.0' },
-        },
-      }) + '\n'));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              protocolVersion: '2024-11-05',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'Test', version: '1.0.0' },
+            },
+          }) + '\n'
+        )
+      );
 
       // Simulate initialized notification
-      mockStdout._dataCallback?.(Buffer.from(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }) + '\n'));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notifications/initialized',
+          }) + '\n'
+        )
+      );
 
       await connectPromise;
 
@@ -293,14 +324,16 @@ describe('McpConnector', () => {
       const connector = new McpConnector(createMockOptions(server));
 
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Send multiple messages at once (simulating chunked data)
       const messages = [
         { jsonrpc: '2.0', id: 1, result: { tools: [] } },
         { jsonrpc: '2.0', method: 'notifications/initialized' },
       ];
-      mockStdout._dataCallback?.(Buffer.from(messages.map(m => JSON.stringify(m)).join('\n') + '\n'));
+      mockStdout._dataCallback?.(
+        Buffer.from(messages.map((m) => JSON.stringify(m)).join('\n') + '\n')
+      );
 
       await connectPromise;
 
@@ -312,13 +345,19 @@ describe('McpConnector', () => {
       const connector = new McpConnector(createMockOptions(server));
 
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Send messages with empty lines
-      mockStdout._dataCallback?.(Buffer.from('\n\n' + JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }) + '\n\n'));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          '\n\n' +
+            JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'notifications/initialized',
+            }) +
+            '\n\n'
+        )
+      );
 
       await connectPromise;
 
@@ -330,15 +369,19 @@ describe('McpConnector', () => {
       const connector = new McpConnector(createMockOptions(server));
 
       const connectPromise = connector.connect(5000);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Send invalid JSON followed by valid message
-      mockStdout._dataCallback?.(Buffer.from(
-        'not valid json\n' + JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'notifications/initialized',
-        }) + '\n'
-      ));
+      mockStdout._dataCallback?.(
+        Buffer.from(
+          'not valid json\n' +
+            JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'notifications/initialized',
+            }) +
+            '\n'
+        )
+      );
 
       await connectPromise;
 

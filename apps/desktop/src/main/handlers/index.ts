@@ -31,6 +31,7 @@ export {
   clipboardTextFromRequest,
   pathTextFromRequest,
   handoffUsageEventPayload,
+  clarificationRendererPayload,
 } from './utils.js';
 
 // Re-export setup functions

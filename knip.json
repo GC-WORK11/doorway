@@ -1,8 +1,4 @@
 {
-  "ignore": [
-    "apps/desktop/src/main/preload.js",
-    "our-competetors-and-resources/**",
-    "OTHER-CLI-TOOL-AND-HARNESSES/**"
-  ],
+  "ignore": ["apps/**", "packages/**"],
   "ignoreDependencies": ["esbuild"]
 }

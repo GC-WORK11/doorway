@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDatabase,
   generateId,
+  getEvents,
   listMeshAgents,
   listTerminalProjections,
   listThreadPeerMessages,
@@ -35,7 +36,7 @@ import { ProjectMemoryLoader } from './memory.js';
 import type Database from 'better-sqlite3';
 import { BrainService } from './brain/brain-service.js';
 import type { DoorwayProviderDriver, ProviderConfig, VaultProvider } from './brain/types.js';
-import type { ThreadId } from '@doorway/protocol';
+import { terminalSubmitInput, type ThreadId } from '@doorway/protocol';
 
 describe('Orchestrator', () => {
   let dataPath: string;
@@ -75,6 +76,7 @@ describe('Orchestrator', () => {
       cwd: dataPath,
       defaultProvider: 'claude',
       terminalManager: createTerminalRuntime(),
+      processSnapshotter: false,
     });
   });
 
@@ -129,6 +131,9 @@ describe('Orchestrator', () => {
       command: string;
     };
     const chunks = db.prepare('SELECT text FROM terminal_chunks').all() as { text: string }[];
+    const inputs = db
+      .prepare('SELECT text, source FROM terminal_inputs ORDER BY sequence ASC')
+      .all() as { text: string; source: string }[];
     const events = db.prepare('SELECT type FROM events ORDER BY sequence').all() as {
       type: string;
     }[];
@@ -136,9 +141,264 @@ describe('Orchestrator', () => {
     expect(session.status).toBe('running');
     expect(session.command).toContain('agent');
     expect(chunks[0]?.text).toContain('agent');
+    expect(inputs[0]).toMatchObject({
+      source: 'doorway',
+      text: expect.stringContaining('agent'),
+    });
+    expect(inputs[0]?.text.endsWith('\r')).toBe(true);
     expect(events.map((event) => event.type)).toContain('terminal.started');
+    expect(events.map((event) => event.type)).toContain('terminal.input');
     expect(events.map((event) => event.type)).toContain('terminal.output');
   });
+
+  it('captures process snapshots for orchestrator-launched terminal sessions', async () => {
+    orchestrator = new Orchestrator(db, createVault(), {
+      cwd: dataPath,
+      defaultProvider: 'claude',
+      terminalManager: createTerminalRuntime(),
+      processSnapshotter: async (rootPid) => ({
+        rootPid,
+        nodes: [
+          {
+            pid: rootPid,
+            ppid: 0,
+            command: 'bash',
+            args: 'bash',
+            cpuPercent: 0,
+            memoryPercent: 0.1,
+          },
+        ],
+      }),
+    });
+    const adapter = createTestAdapter('test-agent');
+    orchestrator.registerAdapter(adapter);
+
+    const runId = await orchestrator.executeTask('thread_1', projectId, 'Snapshot process tree', {
+      provider: 'test-agent',
+    });
+    const sessionId = orchestrator.getRun(runId)?.sessionId;
+    const snapshots = db
+      .prepare(
+        `
+        SELECT phase, root_pid, nodes_json
+        FROM terminal_process_snapshots
+        WHERE session_id = ?
+        ORDER BY rowid ASC
+      `
+      )
+      .all(sessionId) as {
+      readonly phase: string;
+      readonly root_pid: number;
+      readonly nodes_json: string;
+    }[];
+    const events = db.prepare('SELECT type FROM events ORDER BY sequence ASC').all() as {
+      readonly type: string;
+    }[];
+
+    expect(snapshots.map((snapshot) => snapshot.phase)).toEqual(['started', 'running']);
+    expect(JSON.parse(snapshots[0]?.nodes_json ?? '[]')).toEqual([
+      expect.objectContaining({ pid: 1, command: 'bash' }),
+    ]);
+    expect(listTerminalProjections(db, 'thread_1')[0]?.latestProcessSnapshot).toMatchObject({
+      phase: 'running',
+      rootPid: 1,
+      nodes: [expect.objectContaining({ command: 'bash' })],
+    });
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(['process.snapshot_captured'])
+    );
+  });
+
+  it('persists terminal output emitted while a run is paused for clarification', async () => {
+    orchestrator = new Orchestrator(db, createVault(), {
+      cwd: dataPath,
+      defaultProvider: 'claude',
+      terminalManager: createTerminalRuntime(({ sendCount }) =>
+        sendCount === 0 ? 'Should I proceed?\n> ' : 'continuing after answer\n'
+      ),
+      processSnapshotter: false,
+    });
+    const adapter = createTestAdapter('test-agent');
+    orchestrator.registerAdapter(adapter);
+
+    const runId = await orchestrator.executeTask('thread_1', projectId, 'Test prompt', {
+      provider: 'test-agent',
+    });
+    expect(orchestrator.getPendingClarifications()).toHaveLength(1);
+    const [request] = orchestrator.getPendingClarifications();
+
+    expect(
+      getEvents(db, 'thread_1' as ThreadId).find((event) => event.type === 'clarification.requested')
+        ?.payload
+    ).toMatchObject({
+      clarificationId: request.id,
+      threadId: 'thread_1',
+      runId,
+      sessionId: request.sessionId,
+      question: 'Should I proceed?',
+    });
+
+    expect(orchestrator.answerClarification(runId, 'yes')).toBe(true);
+
+    const chunks = db
+      .prepare('SELECT text FROM terminal_chunks ORDER BY sequence ASC')
+      .all() as { text: string }[];
+
+    expect(chunks.map((chunk) => chunk.text)).toContain('Should I proceed?\n> ');
+    expect(chunks.map((chunk) => chunk.text)).toContain('continuing after answer\n');
+    expect(
+      getEvents(db, 'thread_1' as ThreadId).find((event) => event.type === 'clarification.answered')
+        ?.payload
+    ).toMatchObject({
+      clarificationId: request.id,
+      threadId: 'thread_1',
+      runId,
+      sessionId: request.sessionId,
+      answer: 'yes',
+    });
+  });
+
+  it('drives a real PTY question prompt through persisted input and output evidence', async () => {
+    orchestrator = new Orchestrator(db, createVault(), {
+      cwd: dataPath,
+      defaultProvider: 'real-pty-agent',
+    });
+    const adapter = createRealPtyPromptAdapter();
+    orchestrator.registerAdapter(adapter);
+
+    const runId = await orchestrator.executeTask('thread_1', projectId, 'Answer real prompt', {
+      provider: adapter.provider,
+    });
+
+    await waitFor(() => orchestrator.getPendingClarifications().length === 1, 5000);
+    const [request] = orchestrator.getPendingClarifications();
+    expect(request).toMatchObject({
+      runId,
+      threadId: 'thread_1',
+      question: expect.stringContaining('Should I proceed?'),
+    });
+
+    expect(orchestrator.answerClarification(runId, 'yes')).toBe(true);
+    await waitFor(() => {
+      const rows = db
+        .prepare('SELECT COALESCE(clean_text, text) AS text FROM terminal_chunks')
+        .all() as { text: string }[];
+      return rows.some((row) => row.text.includes('Answer:yes'));
+    }, 5000);
+
+    const sessionId = orchestrator.getRun(runId)?.sessionId;
+    const inputs = db
+      .prepare('SELECT text, source FROM terminal_inputs ORDER BY sequence ASC')
+      .all() as { readonly text: string; readonly source: string }[];
+    const chunks = db
+      .prepare('SELECT text, clean_text, state_detection_json FROM terminal_chunks ORDER BY sequence ASC')
+      .all() as {
+      readonly text: string;
+      readonly clean_text: string | null;
+      readonly state_detection_json: string | null;
+    }[];
+    const events = db.prepare('SELECT type FROM events ORDER BY sequence ASC').all() as {
+      readonly type: string;
+    }[];
+
+    expect(sessionId).toBeDefined();
+    expect(inputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'doorway', text: expect.stringContaining('node') }),
+        { source: 'user', text: terminalSubmitInput('yes') },
+      ])
+    );
+    expect(inputs[0]?.text.endsWith('\r')).toBe(true);
+    expect(chunks.map((chunk) => chunk.clean_text ?? chunk.text).join('')).toContain(
+      'Should I proceed?'
+    );
+    expect(chunks.map((chunk) => chunk.clean_text ?? chunk.text).join('')).toContain(
+      'Answer:yes'
+    );
+    expect(
+      chunks.some((chunk) => {
+        if (!chunk.state_detection_json) return false;
+        const detection = JSON.parse(chunk.state_detection_json) as {
+          readonly state?: string;
+          readonly signals?: readonly string[];
+        };
+        return detection.state === 'awaiting_input' && detection.signals?.includes('question_pattern');
+      })
+    ).toBe(true);
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(['terminal.started', 'terminal.input', 'terminal.output'])
+    );
+  }, 10000);
+
+  it('persists real PTY process exit evidence when the owning shell exits', async () => {
+    orchestrator = new Orchestrator(db, createVault(), {
+      cwd: dataPath,
+      defaultProvider: 'real-pty-exit-agent',
+    });
+    const adapter = createRealPtyExitAdapter();
+    orchestrator.registerAdapter(adapter);
+
+    const runId = await orchestrator.executeTask('thread_1', projectId, 'Exit cleanly', {
+      provider: adapter.provider,
+    });
+
+    await waitFor(() => orchestrator.getRun(runId)?.status === 'completed', 5000);
+
+    const run = orchestrator.getRun(runId);
+    const sessionId = run?.sessionId;
+    expect(sessionId).toBeDefined();
+    expect(run?.endTime).toBeInstanceOf(Date);
+    expect(run?.events).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'exit', data: '0' })])
+    );
+
+    const session = db
+      .prepare(
+        `
+        SELECT status, exit_code, signal, exit_kind, exit_label, exit_summary, stopped_at
+        FROM terminal_sessions
+        WHERE id = ?
+      `
+      )
+      .get(sessionId) as {
+      readonly status: string;
+      readonly exit_code: number;
+      readonly signal: string | null;
+      readonly exit_kind: string;
+      readonly exit_label: string;
+      readonly exit_summary: string;
+      readonly stopped_at: string | null;
+    };
+    const inputs = db
+      .prepare('SELECT text, source FROM terminal_inputs ORDER BY sequence ASC')
+      .all() as { readonly text: string; readonly source: string }[];
+    const chunks = db
+      .prepare('SELECT COALESCE(clean_text, text) AS text FROM terminal_chunks ORDER BY sequence ASC')
+      .all() as { readonly text: string }[];
+    const events = db.prepare('SELECT type FROM events ORDER BY sequence ASC').all() as {
+      readonly type: string;
+    }[];
+
+    expect(session).toMatchObject({
+      status: 'stopped',
+      exit_code: 0,
+      signal: null,
+      exit_kind: 'success',
+      exit_label: 'exit 0',
+      exit_summary: 'Command exited successfully.',
+    });
+    expect(session.stopped_at).toBeTruthy();
+    expect(inputs).toEqual(
+      expect.arrayContaining([
+        { source: 'doorway', text: terminalSubmitInput("printf 'doorway-exit-ready\\n'") },
+        { source: 'doorway', text: terminalSubmitInput('exit 0') },
+      ])
+    );
+    expect(chunks.map((chunk) => chunk.text).join('')).toContain('doorway-exit-ready');
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(['terminal.started', 'terminal.input', 'terminal.output', 'terminal.stopped'])
+    );
+  }, 10000);
 
   it('claims a persisted task graph node when launching a terminal run', async () => {
     const adapter = createTestAdapter('test-agent');
@@ -183,6 +443,7 @@ describe('Orchestrator', () => {
       cwd: dataPath,
       defaultProvider: 'claude',
       terminalManager: createTerminalRuntime(),
+      processSnapshotter: false,
       worktreeManager: {
         async createWorktree() {
           return {
@@ -233,7 +494,16 @@ describe('Orchestrator', () => {
       'Compare two lanes',
       ['claude', 'codex'],
       undefined,
-      { projectPath: dataPath, useWorktree: false }
+      {
+        projectPath: dataPath,
+        useWorktree: false,
+        launchOptions: {
+          mode: '/build',
+          permissionProfile: 'ask-writes',
+          worktreeStrategy: 'auto-worktree',
+          ptyMode: 'doorway-pty',
+        },
+      }
     );
     const agents = listMeshAgents(db, 'thread_1');
 
@@ -241,6 +511,20 @@ describe('Orchestrator', () => {
     expect(agents.map((agent) => agent.toolName).sort()).toEqual(['claude', 'codex']);
     expect(new Set(agents.map((agent) => agent.mailboxId)).size).toBe(2);
     expect(agents.map((agent) => agent.runId).sort()).toEqual([...runIds].sort());
+    expect(runIds.map((runId) => orchestrator.getRun(runId)?.launchOptions)).toEqual([
+      {
+        mode: '/build',
+        permissionProfile: 'ask-writes',
+        worktreeStrategy: 'auto-worktree',
+        ptyMode: 'doorway-pty',
+      },
+      {
+        mode: '/build',
+        permissionProfile: 'ask-writes',
+        worktreeStrategy: 'auto-worktree',
+        ptyMode: 'doorway-pty',
+      },
+    ]);
   });
 
   it('routes terminal doorway-action output through the registered launch mailbox', async () => {
@@ -256,6 +540,7 @@ describe('Orchestrator', () => {
       cwd: dataPath,
       defaultProvider: 'claude',
       terminalManager: createTerminalRuntime(actionOutput),
+      processSnapshotter: false,
     });
     registerMeshAgent(db, {
       threadId: 'thread_1',
@@ -320,6 +605,7 @@ describe('Orchestrator', () => {
         });
         return ['```doorway-action', 'type: wait_for_response', 'from: codex', '```'].join('\n');
       }),
+      processSnapshotter: false,
     });
     orchestrator.registerAdapter(createTestAdapter('claude'));
 
@@ -333,13 +619,13 @@ describe('Orchestrator', () => {
       readonly validation_status: string;
     }[];
 
-    expect(inputs).toMatchObject([
-      {
-        source: 'doorway',
-        text: expect.stringContaining('The peer response reached the terminal.'),
-      },
-    ]);
-    expect(inputs[0]?.text).toContain('Doorway peer messages for Test claude');
+    const peerResponseInput = inputs.find((input) =>
+      input.text.includes('The peer response reached the terminal.')
+    );
+    expect(peerResponseInput).toMatchObject({
+      source: 'doorway',
+      text: expect.stringContaining('Doorway peer messages for Test claude'),
+    });
     expect(orchestrator.getRun(runId)?.meshAgentId).toBeDefined();
     expect(actionRows).toEqual([{ validation_status: 'responded' }]);
   });
@@ -805,6 +1091,7 @@ describe('Orchestrator', () => {
       cwd: dataPath,
       defaultProvider: 'claude',
       terminalManager: createTerminalRuntime(),
+      processSnapshotter: false,
       worktreeManager: {
         async createWorktree(options: { readonly projectPath?: string }) {
           seenProjectPaths.push(options.projectPath ?? '');
@@ -836,6 +1123,7 @@ describe('Orchestrator', () => {
       cwd: dataPath,
       defaultProvider: 'claude',
       terminalManager: createTerminalRuntime(),
+      processSnapshotter: false,
       worktreeManager: {
         async createWorktree() {
           throw new Error('worktree creation should not run');
@@ -953,6 +1241,78 @@ function createTestAdapter(provider: string): IAgentAdapter {
       return () => {};
     },
   };
+}
+
+function createRealPtyPromptAdapter(): IAgentAdapter {
+  const script = [
+    "process.stdout.write('Should I proceed? [y/n]\\n> ');",
+    "process.stdin.setEncoding('utf8');",
+    "process.stdin.once('data', (data) => {",
+    "process.stdout.write('Answer:' + data.trim() + '\\n');",
+    'process.exit(0);',
+    '});',
+    'process.stdin.resume();',
+  ].join('');
+
+  return {
+    provider: 'real-pty-agent',
+    name: 'Real PTY Agent',
+    manifest: {
+      id: 'real-pty-agent',
+      name: 'Real PTY Agent',
+      provider: 'real-pty-agent',
+      runtimeMode: 'Visible CLI',
+      executionSurface: 'visible_terminal',
+      credentialMode: 'local_only',
+    },
+    async buildLaunch(context: LaunchContext) {
+      return {
+        command: process.execPath,
+        args: ['-e', script],
+        cwd: context.cwd,
+        env: context.env ?? {},
+      };
+    },
+    onEvent(): () => void {
+      return () => {};
+    },
+  };
+}
+
+function createRealPtyExitAdapter(): IAgentAdapter {
+  return {
+    provider: 'real-pty-exit-agent',
+    name: 'Real PTY Exit Agent',
+    manifest: {
+      id: 'real-pty-exit-agent',
+      name: 'Real PTY Exit Agent',
+      provider: 'real-pty-exit-agent',
+      runtimeMode: 'Visible CLI',
+      executionSurface: 'visible_terminal',
+      credentialMode: 'local_only',
+    },
+    async buildLaunch(context: LaunchContext) {
+      return {
+        command: 'printf',
+        args: ['doorway-exit-ready\\n'],
+        cwd: context.cwd,
+        env: context.env ?? {},
+        stdinPrompt: 'exit 0',
+      };
+    },
+    onEvent(): () => void {
+      return () => {};
+    },
+  };
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out waiting for condition');
 }
 
 function createBrainDriver(complete: (config: ProviderConfig) => string): DoorwayProviderDriver {

@@ -36,7 +36,14 @@ describe('PeerOrchestration', () => {
     db.prepare(
       `INSERT INTO threads (id, project_id, title, status, goal, created_at, updated_at)
        VALUES (?, ?, ?, 'active', ?, ?, ?)`
-    ).run('thread_1', projectId, 'Thread 1', 'Test Task', new Date().toISOString(), new Date().toISOString());
+    ).run(
+      'thread_1',
+      projectId,
+      'Thread 1',
+      'Test Task',
+      new Date().toISOString(),
+      new Date().toISOString()
+    );
 
     peerProtocol = createPeerProtocol(db);
     peerOrchestration = createPeerOrchestration(db, peerProtocol);
@@ -203,7 +210,7 @@ describe('PeerOrchestration', () => {
     });
 
     it('infers capabilities based on provider and kind', () => {
-      peerOrchestration.onAgentStart({
+      const meshId = peerOrchestration.onAgentStart({
         agentId: 'claude_agent',
         threadId: 'thread_1',
         displayName: 'Claude Agent',
@@ -213,7 +220,7 @@ describe('PeerOrchestration', () => {
       });
 
       const registry = peerOrchestration.getRegistry();
-      const profile = registry.getProfile('claude_agent');
+      const profile = registry.getProfile(meshId);
 
       expect(profile).toBeDefined();
       expect(profile?.capabilities).toContain('complex-reasoning');
@@ -238,7 +245,10 @@ describe('PeerOrchestration', () => {
         role: 'implementer',
       });
 
-      const complexAgents = peerOrchestration.findAgentsByCapability('thread_1', 'complex-reasoning');
+      const complexAgents = peerOrchestration.findAgentsByCapability(
+        'thread_1',
+        'complex-reasoning'
+      );
       expect(complexAgents.length).toBeGreaterThan(0);
 
       const fastAgents = peerOrchestration.findAgentsByCapability('thread_1', 'fast-boilerplate');
@@ -399,12 +409,11 @@ describe('PeerOrchestration', () => {
       // Should have separate implementation and testing lanes
       expect(lanes.length).toBeGreaterThanOrEqual(2);
 
-      const hasImpl = lanes.some((l) =>
-        l.description.toLowerCase().includes('implementation')
-      );
-      const hasTest = lanes.some((l) =>
-        l.description.toLowerCase().includes('testing') ||
-        l.description.toLowerCase().includes('test')
+      const hasImpl = lanes.some((l) => l.description.toLowerCase().includes('implementation'));
+      const hasTest = lanes.some(
+        (l) =>
+          l.description.toLowerCase().includes('testing') ||
+          l.description.toLowerCase().includes('test')
       );
 
       expect(hasImpl || lanes.length >= 2).toBe(true);
@@ -497,9 +506,7 @@ describe('PeerOrchestration', () => {
       );
 
       expect(lanes.length).toBeGreaterThanOrEqual(1);
-      const reviewLane = lanes.find((l) =>
-        l.description.toLowerCase().includes('review')
-      );
+      const reviewLane = lanes.find((l) => l.description.toLowerCase().includes('review'));
       expect(reviewLane).toBeDefined();
     });
   });

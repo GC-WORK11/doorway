@@ -41,12 +41,13 @@ export class ClaudeCodeAdapter implements IAgentAdapter {
 
     return {
       command: this.config.cliPath,
-      args: [...(model ? ['--model', model] : []), ...this.config.extraArgs, prompt],
+      args: ['--resume', ...(model ? ['--model', model] : []), ...this.config.extraArgs],
       cwd: context.cwd,
       env: {
         ...context.env,
         CLAUDE_SESSION_ID: `claude_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       },
+      stdinPrompt: prompt,
     };
   }
 

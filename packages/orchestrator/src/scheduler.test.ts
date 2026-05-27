@@ -26,6 +26,7 @@ import {
   isValidCronExpression,
   describeCronExpression,
   SchedulerRuntime,
+  automationTerminalInput,
 } from './scheduler.js';
 import type Database from 'better-sqlite3';
 import type { AgentTerminalRuntime, TerminalLaunchResult } from './index.js';
@@ -209,7 +210,7 @@ describe('SchedulerRuntime', () => {
       expect(run!.exitCode).toBe(0);
       expect(run!.output).toContain('hello world');
       expect(run!.terminalSessionId).toBeNull();
-      expect(terminalManager.inputs[0]).toContain('echo "hello world"');
+      expect(terminalManager.inputs[0]).toBe(automationTerminalInput('echo "hello world"'));
     });
 
     it('returns null for non-existent automation', async () => {

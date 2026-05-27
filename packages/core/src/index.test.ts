@@ -80,6 +80,8 @@ import {
   completeTaskGraphNodeForRun,
   updateTaskNodeStatus,
 } from './task-graph-evidence.js';
+import { createFaultRecoveryService } from './fault-recovery.js';
+import { dbEventBus } from './event-bus.js';
 import { generateId, toISOString, parseDate } from './id-gen.js';
 import { NotFoundError, ValidationError } from './errors.js';
 import type {
@@ -593,7 +595,7 @@ describe('Database', () => {
       });
       expect(findReusableToolLane(db, { threadId, provider: 'codex' })).toBeUndefined();
       expect(followUpTerminalInput('  continue from the last result  ')).toBe(
-        'continue from the last result\n'
+        'continue from the last result\r'
       );
     });
 
@@ -747,6 +749,31 @@ describe('Database', () => {
       expect(event.threadId).toBe(threadId);
       expect(event.type).toBe('thread.status_changed');
       expect(event.sequence).toBeGreaterThan(0);
+    });
+
+    it('emits recorded events through the database event bus', () => {
+      const typedEvents: unknown[] = [];
+      const allEvents: unknown[] = [];
+      const unsubscribeTyped = dbEventBus.on('thread.status_changed', (event) => {
+        typedEvents.push(event);
+      });
+      const unsubscribeAll = dbEventBus.on('*', (event) => {
+        allEvents.push(event);
+      });
+
+      try {
+        const event = recordEvent(db, threadId, 'thread.status_changed', {
+          threadId,
+          previousStatus: 'active',
+          newStatus: 'paused',
+        } as import('@doorway/protocol').ThreadStatusChangedPayload);
+
+        expect(typedEvents).toEqual([event]);
+        expect(allEvents).toEqual([{ event: 'thread.status_changed', payload: event }]);
+      } finally {
+        unsubscribeTyped();
+        unsubscribeAll();
+      }
     });
 
     it('should record thread status changes as replayable lifecycle events', () => {
@@ -1378,6 +1405,83 @@ describe('Database', () => {
       expect(JSON.stringify(outputEvent?.payload)).not.toContain(passwordValue);
       expect(JSON.stringify(outputEvent?.payload)).not.toContain(secretValue);
       expect(JSON.stringify(inputEvent?.payload)).not.toContain(token);
+    });
+
+    it('persists clean terminal text and control events alongside raw output', () => {
+      recordTerminalStarted(db, threadId, {
+        sessionId,
+        runtime: 'pty',
+        workingDirectory: '/repo',
+        command: 'pnpm test',
+        pid: 42,
+      });
+
+      const chunk = appendTerminalChunk(db, threadId, {
+        sessionId,
+        text: '\x1b[31mneeds input\x1b[0m',
+        cleanText: 'needs input',
+        controlEvents: [
+          { type: 'csi', sequence: '\x1b[31m', final: 'm' },
+          { type: 'csi', sequence: '\x1b[0m', final: 'm' },
+        ],
+        screenSnapshot: {
+          buffer: 'main',
+          cursorRow: 0,
+          cursorCol: 11,
+          visibleText: 'needs input',
+        },
+        stateDetection: {
+          state: 'awaiting_input',
+          provider: 'claude',
+          confidence: 0.79,
+          reason: 'Terminal is showing an input prompt.',
+          signals: ['prompt_pattern', 'cursor_visible'],
+        },
+      });
+      const row = db
+        .prepare(
+          'SELECT text, raw_text, clean_text, control_events_json, screen_snapshot_json, state_detection_json FROM terminal_chunks WHERE session_id = ?'
+        )
+        .get(sessionId) as {
+        text: string;
+        raw_text: string;
+        clean_text: string;
+        control_events_json: string;
+        screen_snapshot_json: string;
+        state_detection_json: string;
+      };
+      const [transcriptChunk] = getTerminalTranscript(db, sessionId);
+      const outputEvent = replayEvents(db, threadId).find(
+        (event) => event.type === 'terminal.output'
+      );
+      const stateEvent = replayEvents(db, threadId).find(
+        (event) => event.type === 'terminal.state'
+      );
+      const attentionEvent = replayEvents(db, threadId).find(
+        (event) => event.type === 'agent.attention'
+      );
+      const projection = listTerminalProjections(db, threadId)[0];
+
+      expect(chunk.text).toBe('\x1b[31mneeds input\x1b[0m');
+      expect(chunk.cleanText).toBe('needs input');
+      expect(chunk.controlEvents).toHaveLength(2);
+      expect(chunk.screenSnapshot?.visibleText).toBe('needs input');
+      expect(chunk.stateDetection?.state).toBe('awaiting_input');
+      expect(row.text).toBe('\x1b[31mneeds input\x1b[0m');
+      expect(row.raw_text).toBe('\x1b[31mneeds input\x1b[0m');
+      expect(row.clean_text).toBe('needs input');
+      expect(JSON.parse(row.control_events_json)).toHaveLength(2);
+      expect(JSON.parse(row.screen_snapshot_json).visibleText).toBe('needs input');
+      expect(JSON.parse(row.state_detection_json).state).toBe('awaiting_input');
+      expect(transcriptChunk.cleanText).toBe('needs input');
+      expect(transcriptChunk.controlEvents).toHaveLength(2);
+      expect(transcriptChunk.screenSnapshot?.visibleText).toBe('needs input');
+      expect(transcriptChunk.stateDetection?.state).toBe('awaiting_input');
+      expect(JSON.stringify(outputEvent?.payload)).toContain('needs input');
+      expect(JSON.stringify(outputEvent?.payload)).toContain('awaiting_input');
+      expect(JSON.stringify(stateEvent?.payload)).toContain('awaiting_input');
+      expect(attentionEvent?.payload).toMatchObject({ state: 'needs_input' });
+      expect(projection?.status).toBe('waiting');
     });
 
     it('does not create proof records for non-test terminal commands', () => {
@@ -2377,6 +2481,33 @@ describe('Database', () => {
         routed_message_id: null,
       });
       expect(listThreadPeerMessages(db, threadId)).toEqual([]);
+    });
+  });
+});
+
+describe('FaultRecoveryService', () => {
+  it('does not retry a normal exit 0', () => {
+    const recovery = createFaultRecoveryService();
+    const fault = recovery.detectFaultFromExit(0);
+    const action = recovery.determineRecoveryAction(fault, {
+      sessionId: generateId('term') as TerminalSessionId,
+      runId: generateId('run') as AgentRunId,
+      threadId: generateId('thread') as ThreadId,
+      provider: 'test-agent',
+      startedAt: new Date(),
+      lastHeartbeat: new Date(),
+      status: 'completed',
+      exitCode: 0,
+    });
+
+    expect(fault).toMatchObject({
+      faultType: 'normal_exit',
+      severity: 'permanent',
+      exitCode: 0,
+    });
+    expect(action).toMatchObject({
+      type: 'halt',
+      reason: 'Process exited successfully; no recovery needed',
     });
   });
 });

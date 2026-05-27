@@ -1,5 +1,5 @@
 /**
- * Scheduler - Cron-based automation execution
+ * Scheduler - Cron-based automation execution with retry support
  */
 
 import type Database from 'better-sqlite3';
@@ -21,9 +21,11 @@ import {
   failAutomationRun,
 } from '@doorway/core';
 import { createSessionManager } from '@doorway/terminal-runtime';
-import type { ProjectId, TerminalSessionId, ThreadId } from '@doorway/protocol';
+import type { ProjectId, TerminalSessionId, ThreadId, TerminalExitClassification } from '@doorway/protocol';
+import { terminalSubmitLines } from '@doorway/protocol';
 import type { AgentTerminalRuntime } from './index.js';
 import { getNextRunTime } from './cron.js';
+import { classifyTerminalExit } from '@doorway/terminal-runtime';
 
 export {
   describeCronExpression,
@@ -34,6 +36,23 @@ export {
 } from './cron.js';
 
 /**
+ * Automation retry policy
+ */
+export interface AutomationRetryPolicy {
+  readonly maxRetries: number;
+  readonly baseDelayMs: number;
+  readonly maxDelayMs: number;
+  readonly backoffMultiplier: number;
+}
+
+export const DEFAULT_AUTOMATION_RETRY_POLICY: AutomationRetryPolicy = {
+  maxRetries: 3,
+  baseDelayMs: 5000,
+  maxDelayMs: 120000,
+  backoffMultiplier: 2,
+};
+
+/**
  * SchedulerRuntime - Executes automations based on cron schedules
  */
 export class SchedulerRuntime {
@@ -41,13 +60,20 @@ export class SchedulerRuntime {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private readonly intervalMs = 60000; // Check every minute
   private readonly terminalManager: AgentTerminalRuntime;
+  private readonly retryPolicy: AutomationRetryPolicy;
+  private readonly retryCounts: Map<string, number> = new Map();
 
   constructor(
     private readonly db: Database.Database,
-    options: { readonly terminalManager?: AgentTerminalRuntime; readonly cwd?: string } = {}
+    options: {
+      readonly terminalManager?: AgentTerminalRuntime;
+      readonly cwd?: string;
+      readonly retryPolicy?: AutomationRetryPolicy;
+    } = {}
   ) {
     this.terminalManager = options.terminalManager ?? createSessionManager();
     this.cwd = options.cwd ?? process.cwd();
+    this.retryPolicy = options.retryPolicy ?? DEFAULT_AUTOMATION_RETRY_POLICY;
   }
 
   private readonly cwd: string;
@@ -106,15 +132,19 @@ export class SchedulerRuntime {
   }
 
   /**
-   * Trigger an automation immediately
+   * Trigger an automation immediately with retry support
    */
-  async triggerAutomation(automationId: string): Promise<AutomationRun | null> {
+  async triggerAutomation(
+    automationId: string,
+    options?: { readonly retryCount?: number }
+  ): Promise<AutomationRun | null> {
     const automations = listAutomations(this.db);
     const automation = automations.find((a) => a.id === automationId);
     if (!automation) return null;
 
     const run = createAutomationRun(this.db, automationId);
     const execution = this.createExecutionContext(automation);
+    const retryCount = options?.retryCount ?? 0;
 
     try {
       startAutomationRun(this.db, run.id);
@@ -123,20 +153,78 @@ export class SchedulerRuntime {
       }
 
       const result = await this.runInTerminal(automation, run.id, execution);
-      if (result.exitCode !== 0) {
-        failAutomationRun(this.db, run.id, result.output, result.exitCode);
-        return getAutomationRunById(this.db, run.id);
+      const exitClassification = classifyTerminalExit({ exitCode: result.exitCode });
+
+      // Check if the failure is retryable
+      if (result.exitCode !== 0 && this.isRetryableFailure(exitClassification)) {
+        const currentRetryCount = this.retryCounts.get(automationId) ?? 0;
+        const maxRetries = this.retryPolicy.maxRetries;
+
+        if (currentRetryCount < maxRetries) {
+          // Schedule a retry with exponential backoff
+          const delayMs = this.calculateBackoffDelay(currentRetryCount);
+          console.log(
+            `[Scheduler] Automation ${automationId} failed (retry ${currentRetryCount + 1}/${maxRetries}), scheduling retry in ${delayMs}ms`
+          );
+
+          this.retryCounts.set(automationId, currentRetryCount + 1);
+          failAutomationRun(this.db, run.id, result.output, result.exitCode);
+
+          // Schedule retry
+          setTimeout(() => {
+            void this.triggerAutomation(automationId, { retryCount: currentRetryCount + 1 });
+          }, delayMs);
+
+          return getAutomationRunById(this.db, run.id);
+        } else {
+          // Max retries exceeded
+          console.log(
+            `[Scheduler] Automation ${automationId} exceeded max retries (${maxRetries})`
+          );
+          this.retryCounts.delete(automationId);
+          failAutomationRun(
+            this.db,
+            run.id,
+            `Max retries (${maxRetries}) exceeded: ${result.output}`,
+            result.exitCode
+          );
+          return getAutomationRunById(this.db, run.id);
+        }
       }
 
-      completeAutomationRun(this.db, run.id, {
-        exitCode: result.exitCode,
-        output: result.output,
-      });
+      // Success or non-retryable failure
+      this.retryCounts.delete(automationId);
+
+      if (result.exitCode !== 0) {
+        failAutomationRun(this.db, run.id, result.output, result.exitCode);
+      } else {
+        completeAutomationRun(this.db, run.id, {
+          exitCode: result.exitCode,
+          output: result.output,
+        });
+      }
       return getAutomationRunById(this.db, run.id);
     } catch (error) {
       failAutomationRun(this.db, run.id, String(error));
       return getAutomationRunById(this.db, run.id);
     }
+  }
+
+  private isRetryableFailure(classification: TerminalExitClassification): boolean {
+    const retryableKinds = [
+      'killed',
+      'segmentation_fault',
+      'general_error',
+      'signal',
+    ];
+    return retryableKinds.includes(classification.kind);
+  }
+
+  private calculateBackoffDelay(retryCount: number): number {
+    const delay =
+      this.retryPolicy.baseDelayMs *
+      Math.pow(this.retryPolicy.backoffMultiplier, retryCount);
+    return Math.min(delay, this.retryPolicy.maxDelayMs);
   }
 
   private createExecutionContext(automation: Automation): {
@@ -184,11 +272,18 @@ export class SchedulerRuntime {
       attachAutomationRunEvidence(this.db, runId, { terminalSessionId: sessionId });
     }
 
-    const unsubscribeData = this.terminalManager.onData((emittedSessionId, data) => {
+    const unsubscribeData = this.terminalManager.onData((emittedSessionId, data, decodedChunk) => {
       if (emittedSessionId !== terminal.sessionId) return;
       output.push(data);
       if (execution.threadId) {
-        appendTerminalChunk(this.db, execution.threadId, { sessionId, text: data });
+        appendTerminalChunk(this.db, execution.threadId, {
+          sessionId,
+          text: data,
+          cleanText: decodedChunk?.text,
+          controlEvents: decodedChunk?.controlEvents,
+          screenSnapshot: decodedChunk?.screenSnapshot,
+          stateDetection: decodedChunk?.stateDetection,
+        });
       }
     });
 
@@ -224,5 +319,5 @@ export class SchedulerRuntime {
 
 export function automationTerminalInput(command: string): string {
   const exitCommand = process.platform === 'win32' ? 'exit $LASTEXITCODE' : 'exit $?';
-  return `${command}\n${exitCommand}\n`;
+  return terminalSubmitLines([command, exitCommand]);
 }

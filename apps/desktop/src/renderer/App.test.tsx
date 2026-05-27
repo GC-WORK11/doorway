@@ -94,40 +94,13 @@ describe('App', () => {
     const { App } = await import('./App');
     const html = renderToStaticMarkup(React.createElement(App));
 
-    expect(html).toContain('Local-first agent cockpit');
-    expect(html).toContain('aria-label="Surfaces"');
-    expect(html).toContain('Browser');
-    expect(html).toContain('Terminal');
-    expect(html).toContain('Evidence');
-    expect(html).toContain('Worktrees');
-    expect(html).toContain('Tools');
-    expect(html).toContain('class="rail-icon"');
-    expect(html).toContain('New chat');
-    expect(html).toContain('Search chats and projects');
-    expect(html).toContain('Chats');
-    expect(html).toContain('<small>0</small>');
-    expect(html).toContain('No project opened');
-    expect(html).toContain('Open a local repository');
-    expect(html).toContain('terminal transcripts');
-    expect(html).toContain('Open project');
-    expect(html).toContain('Ask Doorway to coordinate a coding task');
-    expect(html).toContain('Use @CloudCode or @Codex for routing context.');
-    expect(html).toContain('aria-label="Composer mode"');
-    expect(html).toContain('aria-label="Permission posture"');
-    expect(html).toContain('aria-label="Worktree strategy"');
-    expect(html).toContain('aria-label="PTY mode"');
-    expect(html).toContain('Doorway PTY');
-    // Theme is now dark mode (premium default)
-    expect(html).toContain('data-theme="dark"');
+    expect(html).toContain('Orchestration Context');
+    expect(html).toContain('Project Context');
+    expect(html).toContain('Codebase');
+    expect(html).toContain('Agents Available');
+    expect(html).toContain('data-theme="light"');
     expect(html).not.toContain('class="surface-drawer"');
     expect(html).not.toContain('M0 Reality Reset');
-    // The utility rail now has a proper <nav> element for accessibility
-    expect(html).not.toContain('aria-hidden="true">B</span>');
-    expect(html).not.toContain('aria-hidden="true">T</span>');
-    expect(html).not.toContain('Runs');
-    expect(html).not.toContain('will');
-    expect(html).not.toContain('appears here');
-    expect(html).not.toContain('yet');
   });
 
   it('mounts visible Doorway UI from the renderer entrypoint', async () => {
@@ -147,13 +120,11 @@ describe('App', () => {
     expect(mountedTree).toBeDefined();
     const html = renderToStaticMarkup(mountedTree as React.ReactElement);
 
-    expect(html).toContain('Local-first agent cockpit');
-    expect(html).toContain('No project opened');
-    expect(html).toContain('Open a local repository');
-    expect(html).toContain('Ask Doorway to coordinate a coding task');
+    expect(html).toContain('Orchestration Context');
+    expect(html).toContain('Project Context');
+    expect(html).toContain('Codebase');
     expect(html).not.toBe('');
-    // Theme is now dark mode (premium default)
-    expect(html).toContain('data-theme="dark"');
+    expect(html).toContain('data-theme="light"');
 
     vi.doUnmock('react-dom/client');
   });
@@ -166,38 +137,14 @@ describe('App', () => {
     ]);
     const html = renderToStaticMarkup(React.createElement(App));
 
-    expect(tokensCss).toContain('--dw-rail-width: 56px;');
-    expect(tokensCss).toContain('--dw-rail-gap: 8px;');
-    expect(tokensCss).toContain('--dw-sidebar-width: 284px;');
-    expect(stylesCss).toContain(
-      'grid-template-columns: var(--dw-rail-width) var(--dw-rail-gap) var(--dw-sidebar-width)'
+    expect(tokensCss).toContain('--dw-rail-width:');
+    expect(tokensCss).toContain('--dw-sidebar-width:');
+    expect(stylesCss).toContain('.app-shell');
+    expect(stylesCss).toContain('.composer-input-wrapper');
+    expect(stylesCss).toContain('.chat-viewport');
+    expect(html.indexOf('class="chat-viewport"')).toBeLessThan(
+      html.indexOf('class="composer-input-wrapper"')
     );
-    expect(stylesCss).toContain('.utility-rail');
-    // Theme updated to dark mode with new color tokens
-    expect(stylesCss).toContain('rgba(255, 255, 255, 0.06)');
-    expect(stylesCss).toContain('.rail-separator');
-    expect(stylesCss).toContain('.sidebar-thread-group');
-    expect(stylesCss).toContain('.sidebar-context');
-    expect(stylesCss).toContain('width: min(100%, 1240px);');
-    expect(stylesCss).toContain('width: min(380px, calc(100vw - 24px));');
-    expect(stylesCss).toContain('.composer-dock');
-    expect(stylesCss).toContain('.composer-primary-row');
-    expect(stylesCss).toContain('grid-template-columns: 38px minmax(0, 1fr) 42px;');
-    expect(stylesCss).toContain('border-radius: 18px;');
-    expect(stylesCss).toContain('.terminal-surface');
-    expect(stylesCss).toContain('.terminal-mux');
-    expect(stylesCss).toContain('.review-action-group');
-    expect(stylesCss).toContain('.surface-drawer');
-    expect(stylesCss).toContain('position: fixed;');
-    expect(html.indexOf('class="utility-rail"')).toBeLessThan(html.indexOf('class="main-sidebar"'));
-    expect(html.indexOf('class="main-sidebar"')).toBeLessThan(
-      html.indexOf('class="thread-canvas"')
-    );
-    expect(html).toContain('aria-label="Sidebar project context"');
-    expect(html).toContain('class="composer-dock"');
-    expect(html).toContain('class="composer-primary-row"');
-    expect(html).toContain('aria-label="Open command menu"');
-    expect(html).not.toContain('class="surface-drawer"');
   });
 
   it('groups sidebar threads from real selection, status, and timestamps', async () => {
@@ -252,27 +199,19 @@ describe('App', () => {
     const html = renderToStaticMarkup(
       React.createElement(FirstRunProjectPanel, {
         loading: false,
-        projectPath: '/home/govinda/Doorway',
-        setProjectPath: vi.fn(),
-        submitProject: vi.fn(),
+        onSelectFolder: vi.fn(),
       })
     );
     const disabledHtml = renderToStaticMarkup(
       React.createElement(FirstRunProjectPanel, {
-        loading: false,
-        projectPath: '',
-        setProjectPath: vi.fn(),
-        submitProject: vi.fn(),
+        loading: true,
+        onSelectFolder: vi.fn(),
       })
     );
 
     expect(html).toContain('aria-label="Open local repository"');
-    expect(html).toContain('value="/home/govinda/Doorway"');
-    expect(html).toContain('Open project');
-    expect(html).toContain('worktrees');
-    expect(html).toContain('aria-label="Local evidence surfaces"');
-    expect(html).toContain('SQLite ledger');
-    expect(html).toContain('Replay evidence');
+    expect(html).toContain('Open a local repository');
+    expect(html).toContain('Select Folder');
     expect(disabledHtml).toContain('disabled=""');
   });
 
@@ -1220,7 +1159,7 @@ describe('App', () => {
     expect(terminalHtml).toContain('aria-label="xterm terminal transcript"');
     expect(terminalHtml).toContain('aria-label="Terminal transcript text"');
     expect(terminalHtml).toContain('data-interactive="true"');
-    expect(terminalHtml).toContain('3 chunks persisted - interactive');
+    expect(terminalHtml).toContain('Terminal session term_1 - interactive');
   });
 
   it('computes terminal mux sessions and metadata from persisted run evidence', async () => {
@@ -3273,6 +3212,7 @@ describe('App', () => {
       filteredMentionTargets,
       launchModelFromMentions,
       launchProviderFromMentions,
+      launchProvidersFromMentions,
       mentionLabelFromText,
       providerModelCapabilityLabel,
       providerModelLabel,
@@ -3401,7 +3341,7 @@ describe('App', () => {
     expect(
       composerLaunchPreflight({
         provider: 'claude',
-        prompt: '@CloudCode build this',
+        prompt: '@Claude build this',
         mentionTargets: targets,
         tools: policyTools,
       }).canSubmit
@@ -3482,6 +3422,12 @@ describe('App', () => {
     expect(applyMentionTargetToPrompt('please @b', fullTargets[5])).toBe('please /build ');
     expect(launchProviderFromMentions('@CloudCode fix tests', 'generic', targets)).toBe('claude');
     expect(launchProviderFromMentions('@Codex verify tests', 'generic', targets)).toBe('codex');
+    expect(
+      launchProvidersFromMentions('@CloudCode implement and @Codex verify', 'generic', targets)
+    ).toEqual(['claude', 'codex']);
+    expect(
+      launchProvidersFromMentions('@Codex verify then @Codex summarize', 'generic', targets)
+    ).toEqual(['codex']);
     expect(launchModelFromMentions('verify with @GPT-5-2', undefined, targets)).toBe('gpt-5.2');
   });
 

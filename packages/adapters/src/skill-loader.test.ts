@@ -4,7 +4,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { loadSkillFromFile, loadSkillsFromPlugin, findSkillById, searchSkills } from './skill-loader.js';
+import {
+  loadSkillFromFile,
+  loadSkillsFromPlugin,
+  findSkillById,
+  searchSkills,
+} from './skill-loader.js';
 
 describe('skill-loader', () => {
   const tempDirs: string[] = [];
@@ -162,7 +167,16 @@ Content here.
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
           skills: [
-            { id: 'skill-a', name: 'Skill A', description: '', path: '', content: '', tags: [], triggers: [], actions: [] },
+            {
+              id: 'skill-a',
+              name: 'Skill A',
+              description: '',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
           ],
           errors: [],
         },
@@ -170,8 +184,26 @@ Content here.
           pluginId: 'plugin-2',
           pluginPath: '/plugin-2',
           skills: [
-            { id: 'skill-b', name: 'Skill B', description: '', path: '', content: '', tags: [], triggers: [], actions: [] },
-            { id: 'skill-c', name: 'Skill C', description: '', path: '', content: '', tags: [], triggers: [], actions: [] },
+            {
+              id: 'skill-b',
+              name: 'Skill B',
+              description: '',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
+            {
+              id: 'skill-c',
+              name: 'Skill C',
+              description: '',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
           ],
           errors: [],
         },
@@ -188,7 +220,18 @@ Content here.
         {
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
-          skills: [{ id: 'skill-a', name: 'Skill A', description: '', path: '', content: '', tags: [], triggers: [], actions: [] }],
+          skills: [
+            {
+              id: 'skill-a',
+              name: 'Skill A',
+              description: '',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
+          ],
           errors: [],
         },
       ];
@@ -205,8 +248,26 @@ Content here.
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
           skills: [
-            { id: 'git-commit', name: 'Git Commit', description: 'Commit changes', path: '', content: '', tags: [], triggers: [], actions: [] },
-            { id: 'git-push', name: 'Git Push', description: 'Push to remote', path: '', content: '', tags: [], triggers: [], actions: [] },
+            {
+              id: 'git-commit',
+              name: 'Git Commit',
+              description: 'Commit changes',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
+            {
+              id: 'git-push',
+              name: 'Git Push',
+              description: 'Push to remote',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
           ],
           errors: [],
         },
@@ -223,7 +284,16 @@ Content here.
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
           skills: [
-            { id: 'deploy', name: 'Deploy', description: 'Deploy application to production', path: '', content: '', tags: [], triggers: [], actions: [] },
+            {
+              id: 'deploy',
+              name: 'Deploy',
+              description: 'Deploy application to production',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
           ],
           errors: [],
         },
@@ -240,7 +310,16 @@ Content here.
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
           skills: [
-            { id: 'test-skill', name: 'Test Skill', description: '', path: '', content: '', tags: ['testing', 'unit'], triggers: [], actions: [] },
+            {
+              id: 'test-skill',
+              name: 'Test Skill',
+              description: '',
+              path: '',
+              content: '',
+              tags: ['testing', 'unit'],
+              triggers: [],
+              actions: [],
+            },
           ],
           errors: [],
         },
@@ -256,7 +335,18 @@ Content here.
         {
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
-          skills: [{ id: 'skill', name: 'Skill', description: '', path: '', content: '', tags: [], triggers: [], actions: [] }],
+          skills: [
+            {
+              id: 'skill',
+              name: 'Skill',
+              description: '',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
+          ],
           errors: [],
         },
       ];
@@ -270,13 +360,35 @@ Content here.
         {
           pluginId: 'plugin-1',
           pluginPath: '/plugin-1',
-          skills: [{ id: 'dup-skill', name: 'Duplicate', description: 'Match', path: '', content: '', tags: [], triggers: [], actions: [] }],
+          skills: [
+            {
+              id: 'dup-skill',
+              name: 'Duplicate',
+              description: 'Match',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
+          ],
           errors: [],
         },
         {
           pluginId: 'plugin-2',
           pluginPath: '/plugin-2',
-          skills: [{ id: 'dup-skill', name: 'Duplicate', description: 'Match', path: '', content: '', tags: [], triggers: [], actions: [] }],
+          skills: [
+            {
+              id: 'dup-skill',
+              name: 'Duplicate',
+              description: 'Match',
+              path: '',
+              content: '',
+              tags: [],
+              triggers: [],
+              actions: [],
+            },
+          ],
           errors: [],
         },
       ];

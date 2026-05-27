@@ -49,13 +49,12 @@ export class CodexCliAdapter implements IAgentAdapter {
         context.cwd,
         ...(model ? ['--model', model] : []),
         ...this.config.extraArgs,
-        '--',
-        prompt,
       ],
       cwd: context.cwd,
       env: {
         ...context.env,
       },
+      stdinPrompt: prompt,
     };
   }
 

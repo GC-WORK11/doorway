@@ -20,7 +20,7 @@ import type { TerminalSessionId } from '@doorway/protocol';
 // ============================================================================
 
 export interface StreamMessage {
-  readonly type: 'data' | 'exit' | 'resize' | 'error';
+  readonly type: 'data' | 'exit' | 'resize' | 'error' | 'clarification';
   readonly sessionId: TerminalSessionId;
   readonly data?: string;
   readonly exitCode?: number;
@@ -29,6 +29,11 @@ export interface StreamMessage {
   readonly rows?: number;
   readonly error?: string;
   readonly timestamp: string;
+  // Clarification fields
+  readonly clarificationId?: string;
+  readonly question?: string;
+  readonly context?: string;
+  readonly suggestedResponses?: string[];
 }
 
 export interface StreamSubscription {
@@ -161,36 +166,44 @@ export const terminalStreamHub = new TerminalStreamHub();
  */
 export function registerStreamingHandlers(): void {
   // Start streaming for a session
-  ipcMain.handle('terminal:stream-start', (event, { sessionId }: { sessionId: TerminalSessionId }) => {
-    const webContentsId = event.sender.id;
+  ipcMain.handle(
+    'terminal:stream-start',
+    (event, { sessionId }: { sessionId: TerminalSessionId }) => {
+      const webContentsId = event.sender.id;
 
-    terminalStreamHub.subscribe(sessionId, webContentsId);
+      terminalStreamHub.subscribe(sessionId, webContentsId);
 
-    // Send buffered messages to catch up
-    const buffered = terminalStreamHub.getBufferedMessages(sessionId);
-    for (const msg of buffered) {
-      event.sender.send('terminal:stream', msg);
+      // Send buffered messages to catch up
+      const buffered = terminalStreamHub.getBufferedMessages(sessionId);
+      for (const msg of buffered) {
+        event.sender.send('terminal:stream', msg);
+      }
+
+      console.log(
+        `[StreamHandler] Started streaming session ${sessionId.slice(0, 8)} (${buffered.length} buffered)`
+      );
+
+      return {
+        success: true,
+        sessionId,
+        bufferedCount: buffered.length,
+      };
     }
-
-    console.log(`[StreamHandler] Started streaming session ${sessionId.slice(0, 8)} (${buffered.length} buffered)`);
-
-    return {
-      success: true,
-      sessionId,
-      bufferedCount: buffered.length,
-    };
-  });
+  );
 
   // Stop streaming for a session
-  ipcMain.handle('terminal:stream-stop', (event, { sessionId }: { sessionId: TerminalSessionId }) => {
-    const webContentsId = event.sender.id;
+  ipcMain.handle(
+    'terminal:stream-stop',
+    (event, { sessionId }: { sessionId: TerminalSessionId }) => {
+      const webContentsId = event.sender.id;
 
-    terminalStreamHub.unsubscribe(sessionId, webContentsId);
+      terminalStreamHub.unsubscribe(sessionId, webContentsId);
 
-    console.log(`[StreamHandler] Stopped streaming session ${sessionId.slice(0, 8)}`);
+      console.log(`[StreamHandler] Stopped streaming session ${sessionId.slice(0, 8)}`);
 
-    return { success: true };
-  });
+      return { success: true };
+    }
+  );
 
   // Get active streaming sessions
   ipcMain.handle('terminal:stream-active-sessions', () => {
@@ -217,47 +230,47 @@ export function createStreamingBridge(
   onData: (data: string) => void,
   onExit: (exitCode: number, signal: string | null) => void
 ): {
-    onData: (data: string) => void;
-    onExit: (exitCode: number, signal: string | null) => void;
-    onResize: (cols: number, rows: number) => void;
-  } {
-    return {
-      onData: (data: string) => {
-        // Call original handler
-        onData(data);
+  onData: (data: string) => void;
+  onExit: (exitCode: number, signal: string | null) => void;
+  onResize: (cols: number, rows: number) => void;
+} {
+  return {
+    onData: (data: string) => {
+      // Call original handler
+      onData(data);
 
-        // Broadcast to stream hub
-        terminalStreamHub.broadcast({
-          type: 'data',
-          sessionId,
-          data,
-          timestamp: new Date().toISOString(),
-        });
-      },
+      // Broadcast to stream hub
+      terminalStreamHub.broadcast({
+        type: 'data',
+        sessionId,
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    },
 
-      onExit: (exitCode: number, signal: string | null) => {
-        // Call original handler
-        onExit(exitCode, signal);
+    onExit: (exitCode: number, signal: string | null) => {
+      // Call original handler
+      onExit(exitCode, signal);
 
-        // Broadcast to stream hub
-        terminalStreamHub.broadcast({
-          type: 'exit',
-          sessionId,
-          exitCode,
-          signal,
-          timestamp: new Date().toISOString(),
-        });
-      },
+      // Broadcast to stream hub
+      terminalStreamHub.broadcast({
+        type: 'exit',
+        sessionId,
+        exitCode,
+        signal,
+        timestamp: new Date().toISOString(),
+      });
+    },
 
-      onResize: (cols: number, rows: number) => {
-        // Broadcast resize to stream hub
-        terminalStreamHub.broadcast({
-          type: 'resize',
-          sessionId,
-          cols,
-          rows,
-          timestamp: new Date().toISOString(),
-        });
-      },
-    };
-  }
+    onResize: (cols: number, rows: number) => {
+      // Broadcast resize to stream hub
+      terminalStreamHub.broadcast({
+        type: 'resize',
+        sessionId,
+        cols,
+        rows,
+        timestamp: new Date().toISOString(),
+      });
+    },
+  };
+}

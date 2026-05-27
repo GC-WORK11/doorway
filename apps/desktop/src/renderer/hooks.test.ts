@@ -7,6 +7,7 @@ import {
   mergeLiveTerminalChunk,
   mergeLaunchedThreadList,
   permissionDecisionTerminalInput,
+  primaryLaunchRunId,
 } from './hooks';
 
 describe('appendRetained', () => {
@@ -18,8 +19,8 @@ describe('appendRetained', () => {
 
 describe('permissionDecisionTerminalInput', () => {
   it('maps explicit approval decisions to terminal prompt answers', () => {
-    expect(permissionDecisionTerminalInput('approved')).toBe('y\n');
-    expect(permissionDecisionTerminalInput('denied')).toBe('n\n');
+    expect(permissionDecisionTerminalInput('approved')).toBe('y\r');
+    expect(permissionDecisionTerminalInput('denied')).toBe('n\r');
   });
 });
 
@@ -81,6 +82,16 @@ describe('launch thread refresh helpers', () => {
       launchedThread,
       existingThread,
     ]);
+  });
+
+  it('uses the single run id or first multi-agent run id from launch results', () => {
+    expect(primaryLaunchRunId({ runId: 'run_single', threadId: launchedThread.id })).toBe(
+      'run_single'
+    );
+    expect(primaryLaunchRunId({ runIds: ['run_a', 'run_b'], threadId: launchedThread.id })).toBe(
+      'run_a'
+    );
+    expect(primaryLaunchRunId({ threadId: launchedThread.id })).toBeUndefined();
   });
 });
 

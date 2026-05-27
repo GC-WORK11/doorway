@@ -4,7 +4,7 @@
  * All IPC handlers organized by domain.
  */
 
-import { ipcMain, BrowserWindow, clipboard, shell } from 'electron';
+import { ipcMain, BrowserWindow, clipboard, shell, dialog } from 'electron';
 import {
   ProjectService,
   ThreadService,
@@ -38,6 +38,7 @@ import {
   recordTerminalStarted,
   appendTerminalChunk,
   recordTerminalInput,
+  recordTerminalStateDetection,
   recordTerminalStopped,
   recordProcessSnapshot,
   recordProcessSnapshotFailed,
@@ -49,6 +50,8 @@ import {
   listAutomations,
   listAutomationRuns,
   updateAutomation,
+  parseMultiAgentDirective,
+  type ClarificationRequest,
 } from '@doorway/core';
 import { isValidCronExpression, Orchestrator, SchedulerRuntime } from '@doorway/orchestrator';
 import {
@@ -56,6 +59,7 @@ import {
   CodexCliAdapter,
   CursorAdapter,
   GeminiAdapter,
+  AgyAdapter,
 } from '@doorway/adapters';
 import {
   captureProcessTree,
@@ -112,6 +116,7 @@ import {
   clipboardTextFromRequest,
   pathTextFromRequest,
   handoffUsageEventPayload,
+  clarificationRendererPayload,
   runPostMergeTest,
   handoffEventsForRun,
   isHighRiskFile,
@@ -120,6 +125,11 @@ import {
   type ThreadReplayVerificationResult,
 } from './utils.js';
 import { registerStreamingHandlers, terminalStreamHub } from './streaming-ipc.js';
+import {
+  createFaultRecoveryService,
+  type RecoveryAction,
+  type RunningProcess,
+} from '@doorway/core';
 
 // ============================================================================
 // Types
@@ -230,6 +240,16 @@ async function flushAndCloseFileDeltaWatcher(options: {
 // ============================================================================
 
 function registerProjectHandlers(projectService: ProjectService): void {
+  ipcMain.handle('project:selectFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
   ipcMain.handle('project:open', async (_event, req) => {
     return projectService.openProject({
       path: req.path,
@@ -685,6 +705,10 @@ function registerAgentHandlers(
       readonly taskId?: string;
     };
 
+    // Check for multi-agent directive (e.g., "@claude @codex implement auth")
+    const multiAgentDirective = parseMultiAgentDirective(prompt);
+    const isMultiAgent = multiAgentDirective && multiAgentDirective.agentTargets.length > 1;
+
     let thread;
     if (threadId) {
       thread = await threadService.getThread(threadId);
@@ -697,6 +721,57 @@ function registerAgentHandlers(
     const actualThreadId = thread.id;
     const projectId = thread.projectId;
     const project = projectService.getProject(projectId);
+
+    // For multi-agent directives, use launch-best-of-n path
+    if (isMultiAgent && multiAgentDirective) {
+      const providers = multiAgentDirective.agentTargets.map((t) => t.provider);
+
+      for (const launchProvider of providers) {
+        assertThreadToolEnabledWithReceipt(db, {
+          threadId: actualThreadId,
+          toolId: toolIdForAgentProvider(launchProvider),
+          command: `agent:launch ${launchProvider}`,
+        });
+      }
+
+      await threadService.addMessage(actualThreadId, {
+        role: 'user',
+        content: prompt,
+      });
+
+      const runIds = await orchestrator.executeBestOfN(
+        actualThreadId,
+        projectId,
+        multiAgentDirective.goal,
+        providers,
+        undefined,
+        {
+          projectPath: project.path,
+          useWorktree: project.mode === 'git',
+          ...(launchOptions ? { launchOptions } : {}),
+        }
+      );
+
+      const main = getMainWindow();
+      for (const runId of runIds) {
+        const run = orchestrator.getRun(runId);
+        const adapter = orchestrator.getAdapter(run?.provider || 'claude');
+        adapter?.onEvent((event) => {
+          orchestrator.recordEvent(thread.id, 'agent_event', { runId, ...event });
+          if (main && !main.isDestroyed()) {
+            main.webContents.send('agent:event', { runId, ...event });
+          }
+        });
+      }
+
+      return {
+        runIds,
+        threadId: actualThreadId,
+        multiAgent: true,
+      };
+    }
+
+    // Single agent path
     assertThreadToolEnabledWithReceipt(db, {
       threadId: actualThreadId,
       toolId: toolIdForAgentProvider(provider),
@@ -772,7 +847,13 @@ function registerAgentHandlers(
   });
 
   ipcMain.handle('agent:launch-best-of-n', async (_event, req) => {
-    const { threadId, prompt, providers } = req;
+    const { threadId, prompt, providers, launchOptions } = req as {
+      readonly threadId?: string;
+      readonly projectId?: string;
+      readonly prompt: string;
+      readonly providers?: string[];
+      readonly launchOptions?: AgentLaunchOptions;
+    };
 
     let thread;
     if (threadId) {
@@ -803,7 +884,11 @@ function registerAgentHandlers(
       prompt,
       providers ?? ['claude', 'claude'],
       undefined,
-      { projectPath: project.path, useWorktree: project.mode === 'git' }
+      {
+        projectPath: project.path,
+        useWorktree: project.mode === 'git',
+        ...(launchOptions ? { launchOptions } : {}),
+      }
     );
 
     const main = getMainWindow();
@@ -830,6 +915,47 @@ function registerAgentHandlers(
 
   ipcMain.handle('agent:terminate', async (_event, { runId }) => {
     orchestrator.terminateRun(runId);
+  });
+}
+
+// ============================================================================
+// Clarification Handlers
+// ============================================================================
+
+function registerClarificationHandlers(): void {
+  ipcMain.handle('clarification:answer', async (_event, { runId, answer }) => {
+    if (!runId || typeof runId !== 'string') {
+      throw new Error('clarification:answer requires runId');
+    }
+    if (!answer || typeof answer !== 'string') {
+      throw new Error('clarification:answer requires answer');
+    }
+    const success = orchestrator.answerClarification(runId, answer);
+    return { success, runId };
+  });
+
+  ipcMain.handle('clarification:get', async (_event, { clarificationId }) => {
+    if (!clarificationId || typeof clarificationId !== 'string') {
+      throw new Error('clarification:get requires clarificationId');
+    }
+    const request = orchestrator.getClarificationRequest(clarificationId);
+    return request ?? null;
+  });
+
+  ipcMain.handle('clarification:pending', async (_event, { sessionId }) => {
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('clarification:pending requires sessionId');
+    }
+    const request = orchestrator.getPendingClarification(sessionId as TerminalSessionId);
+    return request ?? null;
+  });
+
+  ipcMain.handle('clarification:cancel', async (_event, { runId }) => {
+    if (!runId || typeof runId !== 'string') {
+      throw new Error('clarification:cancel requires runId');
+    }
+    const success = orchestrator.cancelClarification(runId);
+    return { success, runId };
   });
 }
 
@@ -920,6 +1046,13 @@ function registerTerminalHandlers(
 
   ipcMain.handle('terminal:resize', async (_event, { sessionId, cols, rows }) => {
     sessionManager.resize(sessionId, cols, rows);
+    terminalStreamHub.broadcast({
+      type: 'resize',
+      sessionId: sessionId as TerminalSessionId,
+      cols,
+      rows,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   ipcMain.handle('terminal:stop', async (_event, { sessionId }) => {
@@ -929,6 +1062,10 @@ function registerTerminalHandlers(
 
   ipcMain.handle('terminal:get-transcript', async (_event, { sessionId }) => {
     return getTerminalTranscript(db, sessionId);
+  });
+
+  ipcMain.handle('terminal:get-blocks', async (_event, { sessionId }) => {
+    return sessionManager.getBlocks(sessionId as TerminalSessionId);
   });
 
   ipcMain.handle('terminal:get-inputs', async (_event, { sessionId }) => {
@@ -1371,6 +1508,30 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   const { createDatabase } = await import('@doorway/core');
   const db = createDatabase({ dataPath: dbPath });
   const projectService = new ProjectService(db);
+
+  // Auto-seed project and thread on startup if database is empty
+  const existingProjects = projectService.listProjects();
+  if (existingProjects.length === 0) {
+    try {
+      const seededProj = projectService.openProject({
+        path: cwd,
+        name: 'doorway',
+      });
+      console.log(`[Main] Auto-seeded workspace project at: ${cwd}`);
+
+      const existingThreads = threadService.listThreads(seededProj.id);
+      if (existingThreads.length === 0) {
+        threadService.createThread({
+          projectId: seededProj.id,
+          title: 'Welcome to Doorway',
+          goal: 'Initial conversation thread',
+        });
+        console.log('[Main] Auto-seeded initial thread for project');
+      }
+    } catch (err) {
+      console.error('[Main] Failed to auto-seed workspace project:', err);
+    }
+  }
   const gitEngine = new GitEngine({ cwd });
   const worktreeManager = new WorktreeManager(gitEngine);
   const diffService = new GitDiffService(gitEngine);
@@ -1378,16 +1539,56 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   const sessionManager = new SessionManager();
   const scheduler = new SchedulerRuntime(db, { terminalManager: sessionManager, cwd });
 
+  // Fault Recovery Service - auto-detect crashes and retries
+  const faultRecovery = createFaultRecoveryService({
+    enabled: true,
+    onRecoveryAction: (action: RecoveryAction) => {
+      console.log(`[FaultRecovery] ${action.type}: ${action.reason}`);
+      // Forward to renderer for UI notification
+      const main = getMainWindow();
+      if (main && !main.isDestroyed()) {
+        main.webContents.send('fault-recovery:action', {
+          type: action.type,
+          reason: action.reason,
+          message: action.message,
+          delayMs: action.delayMs,
+        });
+      }
+    },
+  });
+
+  // Track process info for fault recovery
+  const sessionToProcess = new Map<string, RunningProcess>();
+
   orchestrator = new Orchestrator(db, vault, {
     cwd,
     worktreeManager,
     terminalManager: sessionManager,
+    onClarificationBroadcast: (request: ClarificationRequest) => {
+      const payload = clarificationRendererPayload(request);
+      terminalStreamHub.broadcast({
+        type: 'clarification',
+        sessionId: payload.sessionId as TerminalSessionId,
+        clarificationId: payload.clarificationId,
+        question: payload.question,
+        context: payload.context,
+        ...(payload.suggestedResponses
+          ? { suggestedResponses: [...payload.suggestedResponses] }
+          : {}),
+        timestamp: new Date().toISOString(),
+      });
+      const main = getMainWindow();
+      if (main && !main.isDestroyed()) {
+        main.webContents.send('fault-recovery:clarification', payload);
+      }
+    },
   });
 
   orchestrator.registerAdapter(new ClaudeCodeAdapter());
   orchestrator.registerAdapter(new CodexCliAdapter());
   orchestrator.registerAdapter(new CursorAdapter());
   orchestrator.registerAdapter(new GeminiAdapter());
+  orchestrator.registerAdapter(new AgyAdapter());
 
   // Track active terminal sessions associated with threads
   const sessionToThread = new Map<string, string>();
@@ -1395,47 +1596,84 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   const sessionToFileWatchers = new Map<string, FileDeltaWatcher>();
 
   // Forward terminal data to renderer and write output chunks to SQLite
-  sessionManager.onData((sessionId, data) => {
+  sessionManager.onData((sessionId, data, decodedChunk) => {
     const threadId = sessionToThread.get(sessionId);
     const chunk = threadId
       ? appendTerminalChunk(db, threadId as ThreadId, {
           sessionId: sessionId as TerminalSessionId,
           text: data,
+          cleanText: decodedChunk?.text,
+          controlEvents: decodedChunk?.controlEvents,
+          screenSnapshot: decodedChunk?.screenSnapshot,
+          stateDetection: decodedChunk?.stateDetection,
           isStdout: true,
         })
       : undefined;
 
     // Broadcast to StreamHub for real-time streaming (fast path)
+    // This is the ONLY path - no double delivery via terminal:data
     terminalStreamHub.broadcast({
       type: 'data',
       sessionId: sessionId as TerminalSessionId,
       data,
       timestamp: new Date().toISOString(),
     });
+  });
 
-    // Also send via IPC (legacy, for non-streaming renderer)
-    const main = getMainWindow();
-    if (main && !main.isDestroyed()) {
-      main.webContents.send('terminal:data', {
-        sessionId,
-        data,
-        ...(chunk ? { chunk } : {}),
-      });
-    }
+  sessionManager.onStateChange((sessionId, detection) => {
+    const threadId = sessionToThread.get(sessionId);
+    if (!threadId) return;
+    recordTerminalStateDetection(db, threadId as ThreadId, {
+      sessionId: sessionId as TerminalSessionId,
+      detection,
+      source: 'silence_confirmation',
+    });
   });
 
   // Track session exits and record stopped in SQLite
-  sessionManager.onExit((sessionId, exitCode, signal) => {
+  sessionManager.onExit(async (sessionId, exitCode, signal) => {
     const threadId = sessionToThread.get(sessionId);
+    const process = sessionToProcess.get(sessionId);
 
-    // Broadcast exit to StreamHub for real-time streaming
-    terminalStreamHub.broadcast({
-      type: 'exit',
-      sessionId: sessionId as TerminalSessionId,
-      exitCode,
-      signal,
-      timestamp: new Date().toISOString(),
-    });
+    // Fault Detection - detect crash/timeout/OOM from exit
+    if (process) {
+      const fault = faultRecovery.detectFaultFromExit(exitCode ?? -1, signal ?? undefined);
+
+      // Only handle actual faults (not successful exits)
+      if (fault.severity !== 'permanent' || exitCode !== 0) {
+        const recoveryAction = faultRecovery.determineRecoveryAction(fault, process);
+        console.log(
+          `[FaultRecovery] Session ${sessionId.slice(0, 8)} exit: ${fault.faultType} (${fault.severity}) → ${recoveryAction.type}`
+        );
+
+        // Execute recovery if needed
+        if (recoveryAction.type === 'retry') {
+          const shouldRetry = await faultRecovery.executeRecovery(recoveryAction, process);
+          if (shouldRetry) {
+            // Re-launch the agent
+            console.log(`[FaultRecovery] Re-launching agent for session ${sessionId.slice(0, 8)}`);
+            // The orchestrator will handle the actual re-launch via runId
+          }
+        } else if (recoveryAction.type === 'ask_user') {
+          // Forward to renderer for user prompt
+          const main = getMainWindow();
+          if (main && !main.isDestroyed()) {
+            main.webContents.send('fault-recovery:clarification', {
+              sessionId,
+              runId: process.runId,
+              threadId: process.threadId,
+              faultType: fault.faultType,
+              reason: fault.reason,
+              message: recoveryAction.message,
+            });
+          }
+        }
+      }
+
+      // Cleanup
+      faultRecovery.unregisterProcess(sessionId as TerminalSessionId);
+      sessionToProcess.delete(sessionId);
+    }
 
     if (threadId) {
       const rootPid = sessionToPid.get(sessionId);
@@ -1445,7 +1683,7 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
         signal: signal || undefined,
       });
       if (rootPid) {
-        void captureAndRecordProcessSnapshot({
+        await captureAndRecordProcessSnapshot({
           db,
           threadId: threadId as ThreadId,
           sessionId: sessionId as TerminalSessionId,
@@ -1455,7 +1693,7 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
       }
       const fileWatcher = sessionToFileWatchers.get(sessionId);
       if (fileWatcher) {
-        void flushAndCloseFileDeltaWatcher({
+        await flushAndCloseFileDeltaWatcher({
           db,
           threadId: threadId as ThreadId,
           sessionId: sessionId as TerminalSessionId,
@@ -1466,6 +1704,15 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
       sessionToPid.delete(sessionId);
       sessionToFileWatchers.delete(sessionId);
     }
+
+    // Broadcast exit to StreamHub for real-time streaming AFTER all database writes are fully awaited
+    terminalStreamHub.broadcast({
+      type: 'exit',
+      sessionId: sessionId as TerminalSessionId,
+      exitCode,
+      signal,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // DB Reactivity via EventBus
@@ -1485,6 +1732,7 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   registerClipboardHandlers(db);
   registerHandoffHandlers(db, threadService, orchestrator);
   registerAgentHandlers(db, threadService, projectService, orchestrator, sessionManager, cwd);
+  registerClarificationHandlers();
   registerTerminalHandlers(
     db,
     sessionManager,
@@ -1508,6 +1756,49 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
   // Register streaming IPC handlers for real-time terminal output
   registerStreamingHandlers();
 
+  ipcMain.handle('project:list-files', async (_event, { path: projectPath }) => {
+    try {
+      const fs = await import('node:fs/promises');
+      const path = await import('node:path');
+      
+      const scanDir = async (dir: string, depth = 0): Promise<any[]> => {
+        if (depth > 2) return [];
+        try {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          const list = [];
+          for (const entry of entries) {
+            if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') {
+              continue;
+            }
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              list.push({
+                name: entry.name,
+                path: fullPath,
+                isDir: true,
+                children: await scanDir(fullPath, depth + 1),
+              });
+            } else {
+              list.push({
+                name: entry.name,
+                path: fullPath,
+                isDir: false,
+              });
+            }
+          }
+          return list;
+        } catch {
+          return [];
+        }
+      };
+
+      return await scanDir(projectPath);
+    } catch (err) {
+      console.error('Failed to list files:', err);
+      return [];
+    }
+  });
+
   scheduler.start();
 
   // Forward browser events to renderer
@@ -1524,6 +1815,387 @@ export async function setupMainHandlers(config: MainHandlersConfig = {}): Promis
     const main = getMainWindow();
     if (main && !main.isDestroyed()) {
       main.webContents.send('browser:action', action);
+    }
+  });
+
+  ipcMain.handle('project:write-demo-game', async (_event, { projectPath }) => {
+    try {
+      const fs = await import('node:fs/promises');
+      const path = await import('node:path');
+      const htmlFilePath = path.join(projectPath, 'index.html');
+      
+      const gameCode = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Snake & Balls Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f7f7f7;
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #111;
+            font-size: 20px;
+            font-weight: 600;
+            pointer-events: none;
+            background: rgba(255, 255, 255, 0.85);
+            padding: 10px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+        #gameover-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        #gameover-screen h1 {
+            font-size: 48px;
+            color: #111;
+            margin-bottom: 10px;
+        }
+        #gameover-screen p {
+            font-size: 24px;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        #restart-btn {
+            background: #111;
+            color: #fff;
+            border: none;
+            padding: 12px 30px;
+            font-size: 18px;
+            font-weight: 500;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        #restart-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+            background: #333;
+        }
+    </style>
+    <!-- Include Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="ui-container">Score: <span id="score">0</span></div>
+    <div id="gameover-screen">
+        <h1>Game Over</h1>
+        <p>Final Score: <span id="final-score">0</span></p>
+        <button id="restart-btn" onclick="resetGame()">Play Again</button>
+    </div>
+    <div id="canvas-container"></div>
+
+    <script>
+        let scene, camera, renderer;
+        let snake = [];
+        let snakeDirection = new THREE.Vector3(1, 0, 0);
+        let nextDirection = new THREE.Vector3(1, 0, 0);
+        let food;
+        let score = 0;
+        const gridBound = 15;
+        let gameActive = true;
+        let lastMoveTime = 0;
+        const moveInterval = 150; // speed
+
+        init();
+        animate();
+
+        function init() {
+            // Scene & Camera
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf3f4f6);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 22, 16);
+            camera.lookAt(0, 0, -2);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 40;
+            const d = 20;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            // Table / Arena
+            const arenaGeo = new THREE.BoxGeometry(gridBound * 2, 0.5, gridBound * 2);
+            const arenaMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+            const arena = new THREE.Mesh(arenaGeo, arenaMat);
+            arena.position.y = -0.25;
+            arena.receiveShadow = true;
+            scene.add(arena);
+
+            // Arena Borders
+            const borderMat = new THREE.MeshStandardMaterial({ color: 0xe5e7eb });
+            const borderGeoH = new THREE.BoxGeometry(gridBound * 2 + 1, 1, 0.5);
+            const borderGeoV = new THREE.BoxGeometry(0.5, 1, gridBound * 2 + 1);
+
+            const borderN = new THREE.Mesh(borderGeoH, borderMat);
+            borderN.position.set(0, 0.25, -gridBound - 0.25);
+            borderN.castShadow = true;
+            scene.add(borderN);
+
+            const borderS = new THREE.Mesh(borderGeoH, borderMat);
+            borderS.position.set(0, 0.25, gridBound + 0.25);
+            borderS.castShadow = true;
+            scene.add(borderS);
+
+            const borderW = new THREE.Mesh(borderGeoV, borderMat);
+            borderW.position.set(-gridBound - 0.25, 0.25, 0);
+            borderW.castShadow = true;
+            scene.add(borderW);
+
+            const borderE = new THREE.Mesh(borderGeoV, borderMat);
+            borderE.position.set(gridBound + 0.25, 0.25, 0);
+            borderE.castShadow = true;
+            scene.add(borderE);
+
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(gridBound * 2, gridBound * 2, 0xcccccc, 0xe5e7eb);
+            gridHelper.position.y = 0.01;
+            scene.add(gridHelper);
+
+            // Spawn Snake
+            spawnSnake();
+
+            // Spawn Food
+            spawnFood();
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+        }
+
+        function spawnSnake() {
+            // Remove old snake meshes
+            snake.forEach(part => scene.remove(part.mesh));
+            snake = [];
+
+            // Add head
+            const headGeo = new THREE.SphereGeometry(0.5, 32, 32);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1, metalness: 0.1 });
+            const headMesh = new THREE.Mesh(headGeo, headMat);
+            headMesh.position.set(0, 0.5, 0);
+            headMesh.castShadow = true;
+            scene.add(headMesh);
+            snake.push({ mesh: headMesh, pos: new THREE.Vector3(0, 0.5, 0) });
+
+            // Add body parts
+            for (let i = 1; i <= 3; i++) {
+                addBodyPart(new THREE.Vector3(-i, 0.5, 0));
+            }
+            snakeDirection.set(1, 0, 0);
+            nextDirection.set(1, 0, 0);
+        }
+
+        function addBodyPart(position) {
+            const bodyGeo = new THREE.SphereGeometry(0.42, 32, 32);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.2 });
+            const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+            bodyMesh.position.copy(position);
+            bodyMesh.castShadow = true;
+            scene.add(bodyMesh);
+            snake.push({ mesh: bodyMesh, pos: position.clone() });
+        }
+
+        function spawnFood() {
+            if (food) scene.remove(food);
+
+            const foodGeo = new THREE.SphereGeometry(0.45, 32, 32);
+            const foodMat = new THREE.MeshStandardMaterial({ 
+                color: 0xef4444, 
+                emissive: 0xef4444, 
+                emissiveIntensity: 0.3,
+                roughness: 0.1 
+            });
+            food = new THREE.Mesh(foodGeo, foodMat);
+            food.castShadow = true;
+            
+            // Random position
+            let validPos = false;
+            let rx, rz;
+            while (!validPos) {
+                rx = Math.floor(Math.random() * (gridBound * 2 - 2)) - (gridBound - 1);
+                rz = Math.floor(Math.random() * (gridBound * 2 - 2)) - (gridBound - 1);
+                validPos = true;
+                for (let part of snake) {
+                    if (part.pos.x === rx && part.pos.z === rz) {
+                        validPos = false;
+                        break;
+                    }
+                }
+            }
+            food.position.set(rx, 0.5, rz);
+            scene.add(food);
+        }
+
+        function animate(timestamp) {
+            requestAnimationFrame(animate);
+
+            if (gameActive && timestamp - lastMoveTime > moveInterval) {
+                moveSnake();
+                lastMoveTime = timestamp;
+            }
+
+            // Food pulse animation
+            if (food) {
+                const s = 1 + Math.sin(Date.now() * 0.008) * 0.15;
+                food.scale.set(s, s, s);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function moveSnake() {
+            snakeDirection.copy(nextDirection);
+            
+            // Calculate new head position
+            const newHeadPos = snake[0].pos.clone().add(snakeDirection);
+
+            // Wall collisions
+            if (Math.abs(newHeadPos.x) >= gridBound || Math.abs(newHeadPos.z) >= gridBound) {
+                endGame();
+                return;
+            }
+
+            // Self collisions
+            for (let i = 1; i < snake.length; i++) {
+                if (snake[i].pos.equals(newHeadPos)) {
+                    endGame();
+                    return;
+                }
+            }
+
+            // Check food collision
+            const foodCollision = newHeadPos.distanceTo(food.position) < 0.2;
+
+            // Move body
+            for (let i = snake.length - 1; i > 0; i--) {
+                snake[i].pos.copy(snake[i-1].pos);
+                snake[i].mesh.position.copy(snake[i].pos);
+            }
+
+            // Move head
+            snake[0].pos.copy(newHeadPos);
+            snake[0].mesh.position.copy(newHeadPos);
+
+            if (foodCollision) {
+                score++;
+                document.getElementById('score').innerText = score;
+                addBodyPart(snake[snake.length - 1].pos);
+                spawnFood();
+            }
+        }
+
+        function onKeyDown(e) {
+            if (!gameActive) return;
+            switch(e.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    if (snakeDirection.z !== 1) nextDirection.set(0, 0, -1);
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    if (snakeDirection.z !== -1) nextDirection.set(0, 0, 1);
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    if (snakeDirection.x !== 1) nextDirection.set(-1, 0, 0);
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    if (snakeDirection.x !== -1) nextDirection.set(1, 0, 0);
+                    break;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function endGame() {
+            gameActive = false;
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('gameover-screen').style.display = 'flex';
+        }
+
+        function resetGame() {
+            score = 0;
+            document.getElementById('score').innerText = score;
+            document.getElementById('gameover-screen').style.display = 'none';
+            spawnSnake();
+            spawnFood();
+            gameActive = true;
+            lastMoveTime = performance.now();
+        }
+    </script>
+</body>
+</html>`;
+      
+      await fs.writeFile(htmlFilePath, gameCode, 'utf8');
+      return { ok: true, path: htmlFilePath };
+    } catch (err) {
+      console.error('Failed to write demo game:', err);
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('project:open-system-browser', async (_event, { url }) => {
+    try {
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (err) {
+      console.error('Failed to open system browser:', err);
+      return { ok: false, error: String(err) };
     }
   });
 

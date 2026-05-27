@@ -5,8 +5,17 @@ import {
   generateAutomationSuggestions,
   type AutomationSuggestion,
 } from './automation-suggestions.js';
-import { PatternSurfaceService, createPatternSurfaceService, type PatternEvent, type Pattern } from './pattern-surface.js';
-import { SessionReviewService, createSessionReviewService, type SessionReviewEvent } from './session-review.js';
+import {
+  PatternSurfaceService,
+  createPatternSurfaceService,
+  type PatternEvent,
+  type Pattern,
+} from './pattern-surface.js';
+import {
+  SessionReviewService,
+  createSessionReviewService,
+  type SessionReviewEvent,
+} from './session-review.js';
 
 describe('AutomationSuggestionEngine', () => {
   let patternService: PatternSurfaceService;
@@ -34,7 +43,7 @@ describe('AutomationSuggestionEngine', () => {
       const patterns = patternService.getPatterns('workflow');
       const suggestions = engine.generateAutomationSuggestions(patterns, []);
 
-      const pipelineSuggestions = suggestions.filter(s => s.type === 'pipeline');
+      const pipelineSuggestions = suggestions.filter((s) => s.type === 'pipeline');
       expect(pipelineSuggestions.length).toBeGreaterThan(0);
       expect(pipelineSuggestions[0].title).toContain('Pipeline automation');
     });
@@ -49,7 +58,7 @@ describe('AutomationSuggestionEngine', () => {
       const patterns = patternService.getPatterns('workflow');
       const suggestions = engine.generateAutomationSuggestions(patterns, []);
 
-      const pipelineSuggestions = suggestions.filter(s => s.type === 'pipeline');
+      const pipelineSuggestions = suggestions.filter((s) => s.type === 'pipeline');
       expect(pipelineSuggestions.length).toBe(0);
     });
   });
@@ -70,7 +79,7 @@ describe('AutomationSuggestionEngine', () => {
       const patterns = patternService.getPatterns('time_pattern');
       const suggestions = engine.generateAutomationSuggestions(patterns, []);
 
-      const scheduledSuggestions = suggestions.filter(s => s.type === 'scheduled');
+      const scheduledSuggestions = suggestions.filter((s) => s.type === 'scheduled');
       expect(scheduledSuggestions.length).toBeGreaterThan(0);
       expect(scheduledSuggestions[0].title).toContain('Scheduled');
     });
@@ -106,7 +115,7 @@ describe('AutomationSuggestionEngine', () => {
       const reviews = sessionService.getSessionReviews();
       const suggestions = engine.generateAutomationSuggestions(patterns, reviews);
 
-      const preemptiveSuggestions = suggestions.filter(s => s.type === 'preemptive');
+      const preemptiveSuggestions = suggestions.filter((s) => s.type === 'preemptive');
       expect(preemptiveSuggestions.length).toBeGreaterThan(0);
       expect(preemptiveSuggestions[0].description).toContain('unreliable_api_call');
     });
@@ -153,7 +162,7 @@ describe('AutomationSuggestionEngine', () => {
       const reviews = sessionService.getSessionReviews();
       const suggestions = engine.generateAutomationSuggestions(patterns, reviews);
 
-      const preemptiveSuggestions = suggestions.filter(s => s.type === 'preemptive');
+      const preemptiveSuggestions = suggestions.filter((s) => s.type === 'preemptive');
       // Should not suggest preemptive for 10% failure rate (below 0.7 threshold)
       expect(preemptiveSuggestions.length).toBe(0);
     });

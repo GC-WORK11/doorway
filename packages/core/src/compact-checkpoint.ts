@@ -242,7 +242,7 @@ function latestTerminalChunks(
   return db
     .prepare(
       `
-      SELECT text, is_stderr
+      SELECT COALESCE(clean_text, text) AS text, is_stderr
       FROM terminal_chunks
       WHERE session_id IN (${placeholders})
       ORDER BY created_at DESC, sequence DESC

@@ -20,14 +20,14 @@ import { PeerProtocolService, type PeerInfo } from './peer-protocol.js';
  * Used for task-to-agent matching in O2.
  */
 export type AgentCapabilityTag =
-  | 'fast-boilerplate'      // Codex-style: quick scaffolding, repetitive tasks
-  | 'complex-reasoning'     // Claude-style: deep analysis, architecture design
-  | 'code-review'           // Security, style, correctness focus
-  | 'testing'               // Test writing, verification
-  | 'refactoring'          // Code improvement, debt reduction
-  | 'documentation'         // Docs, comments, READMEs
-  | 'debugging'             // Investigation, problem solving
-  | 'browser-automation';   // Web interactions, Playwright
+  | 'fast-boilerplate' // Codex-style: quick scaffolding, repetitive tasks
+  | 'complex-reasoning' // Claude-style: deep analysis, architecture design
+  | 'code-review' // Security, style, correctness focus
+  | 'testing' // Test writing, verification
+  | 'refactoring' // Code improvement, debt reduction
+  | 'documentation' // Docs, comments, READMEs
+  | 'debugging' // Investigation, problem solving
+  | 'browser-automation'; // Web interactions, Playwright
 
 /**
  * Agent profile with discovered capabilities and metadata.
@@ -40,10 +40,10 @@ export interface AgentProfile {
   readonly provider: string;
   readonly role: string;
   readonly capabilities: readonly AgentCapabilityTag[];
-  readonly strengthScore: number;        // 0-100, historical success rate
-  readonly taskCount: number;            // Total tasks assigned
-  readonly successCount: number;         // Successful completions
-  readonly averageDurationMs: number;    // For workload estimation
+  readonly strengthScore: number; // 0-100, historical success rate
+  readonly taskCount: number; // Total tasks assigned
+  readonly successCount: number; // Successful completions
+  readonly averageDurationMs: number; // For workload estimation
   readonly lastSeen: Date;
 }
 
@@ -54,7 +54,7 @@ export interface TaskAssignment {
   readonly agentProfile: AgentProfile;
   readonly taskId: string;
   readonly taskLane: TaskLane;
-  readonly confidence: number;          // 0-1, match quality
+  readonly confidence: number; // 0-1, match quality
   readonly reasoning: string;
 }
 
@@ -66,10 +66,10 @@ export interface TaskLane {
   readonly laneId: string;
   readonly parentTaskId: string;
   readonly description: string;
-  readonly capabilities: readonly AgentCapabilityTag[];  // Required for matching
+  readonly capabilities: readonly AgentCapabilityTag[]; // Required for matching
   readonly estimatedComplexity: 'low' | 'medium' | 'high';
-  readonly parentLinks: readonly string[];               // IDs of parent lanes
-  readonly dependsOn: readonly string[];                // Lane IDs this depends on
+  readonly parentLinks: readonly string[]; // IDs of parent lanes
+  readonly dependsOn: readonly string[]; // Lane IDs this depends on
   readonly metadata: Readonly<Record<string, string | number | boolean>>;
 }
 
@@ -126,7 +126,7 @@ export class AgentProfileRegistry {
       provider: input.provider,
       role: input.role,
       capabilities: this.inferCapabilities(input.kind, input.provider, input.role),
-      strengthScore: 50,  // Start at neutral
+      strengthScore: 50, // Start at neutral
       taskCount: 0,
       successCount: 0,
       averageDurationMs: 0,
@@ -262,11 +262,7 @@ export class TaskLaneExtractor {
    * Extract independent lanes from a task goal.
    * Returns lanes that can run in parallel.
    */
-  extractLanes(
-    taskId: string,
-    goal: string,
-    mode: 'parallel' | 'sequential'
-  ): readonly TaskLane[] {
+  extractLanes(taskId: string, goal: string, mode: 'parallel' | 'sequential'): readonly TaskLane[] {
     if (mode === 'sequential') {
       return [this.createLane(taskId, goal, 'low', [])];
     }
@@ -286,7 +282,9 @@ export class TaskLaneExtractor {
 
     // Check for test + implementation pattern
     if (
-      (goalLower.includes('implement') || goalLower.includes('add') || goalLower.includes('create')) &&
+      (goalLower.includes('implement') ||
+        goalLower.includes('add') ||
+        goalLower.includes('create')) &&
       (goalLower.includes('test') || goalLower.includes('verify'))
     ) {
       lanes.push(
@@ -323,9 +321,7 @@ export class TaskLaneExtractor {
       }
 
       if (implLanes.length > 0) {
-        lanes.push(
-          this.createLane(taskId, implLanes.join(', '), 'medium', ['complex-reasoning'])
-        );
+        lanes.push(this.createLane(taskId, implLanes.join(', '), 'medium', ['complex-reasoning']));
       }
       if (testLanes.length > 0) {
         lanes.push(this.createLane(taskId, testLanes.join(', '), 'low', ['testing']));
@@ -426,9 +422,7 @@ export class TaskAssignmentEngine {
 
     for (const lane of remainingLanes) {
       // Filter out already-used agents
-      const eligibleProfiles = availableProfiles.filter(
-        (p) => !usedAgents.has(p.agentId)
-      );
+      const eligibleProfiles = availableProfiles.filter((p) => !usedAgents.has(p.agentId));
 
       const assignment = this.assignLane(lane, eligibleProfiles, peerProtocol, threadId);
       if (assignment) {
@@ -443,10 +437,7 @@ export class TaskAssignmentEngine {
   /**
    * Create a synthesis card for coordinating lane results (fan-in pattern).
    */
-  createSynthesisCard(
-    parentTaskId: string,
-    childLaneIds: readonly string[]
-  ): SynthesisCard {
+  createSynthesisCard(parentTaskId: string, childLaneIds: readonly string[]): SynthesisCard {
     return {
       synthesisId: `synth_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       parentTaskId,
@@ -538,6 +529,10 @@ export class PeerOrchestrationService {
     role: string;
     currentTask?: string;
   }): string {
+    if (this.tryStartExistingAgent(input)) {
+      return input.agentId;
+    }
+
     // Register with peer protocol
     const meshAgent = this.peerProtocol.registerPeer({
       threadId: input.threadId,
@@ -572,6 +567,37 @@ export class PeerOrchestrationService {
     this.checkSynthesisUnblock(input.threadId);
 
     return meshAgent.id;
+  }
+
+  private tryStartExistingAgent(input: {
+    agentId: string;
+    threadId: string;
+    displayName: string;
+    kind: MeshAgentKind;
+    provider: string;
+    role: string;
+    currentTask?: string;
+  }): boolean {
+    try {
+      this.agentIdMap.set(input.agentId, input.agentId);
+      this.registry.registerAgent({
+        agentId: input.agentId,
+        displayName: input.displayName,
+        kind: input.kind,
+        provider: input.provider,
+        role: input.role,
+      });
+      this.peerProtocol.updatePeerStatus(input.agentId, 'running', {
+        currentTask: input.currentTask,
+        progress: 0,
+      });
+      this.startHeartbeat(input.agentId, input.threadId);
+      this.checkSynthesisUnblock(input.threadId);
+      return true;
+    } catch {
+      this.agentIdMap.delete(input.agentId);
+      return false;
+    }
   }
 
   /**
@@ -674,24 +700,42 @@ export class PeerOrchestrationService {
     this.stopHeartbeat(meshAgentId);
   }
 
-  /**
-   * Query who is running in a thread (exposed to orchestrator planning).
-   */
   whoIsRunning(threadId: string, excludeAgentId?: string): readonly PeerInfo[] {
-    return this.peerProtocol.whoIsRunning(threadId, excludeAgentId);
+    const resolvedExclude = excludeAgentId
+      ? (this.agentIdMap.get(excludeAgentId) ?? excludeAgentId)
+      : undefined;
+    const peers = this.peerProtocol.whoIsRunning(threadId, resolvedExclude);
+    return peers.map((peer) => {
+      let callerId = peer.agentId;
+      for (const [cId, mId] of this.agentIdMap.entries()) {
+        if (mId === peer.agentId) {
+          callerId = cId;
+          break;
+        }
+      }
+      return {
+        ...peer,
+        agentId: callerId,
+      };
+    });
   }
 
   // --------------------------------------------------------------------------
   // O2: Agent Profile Discovery + Task Assignment
   // --------------------------------------------------------------------------
 
-  /**
-   * Discover available agents before planning.
-   */
   discoverAgents(threadId: string): readonly AgentProfile[] {
     const runningPeers = this.whoIsRunning(threadId);
     return runningPeers
-      .map((peer) => this.registry.getProfile(peer.agentId))
+      .map((peer) => {
+        const meshId = this.agentIdMap.get(peer.agentId) ?? peer.agentId;
+        const profile = this.registry.getProfile(meshId);
+        if (!profile) return undefined;
+        return {
+          ...profile,
+          agentId: peer.agentId,
+        };
+      })
       .filter((p): p is AgentProfile => p !== undefined);
   }
 
@@ -708,14 +752,8 @@ export class PeerOrchestrationService {
   /**
    * Assign a task to an agent based on capabilities.
    */
-  assignTask(
-    lane: TaskLane,
-    threadId: string,
-    excludeAgentId?: string
-  ): TaskAssignment | null {
-    const available = this.discoverAgents(threadId).filter(
-      (p) => p.agentId !== excludeAgentId
-    );
+  assignTask(lane: TaskLane, threadId: string, excludeAgentId?: string): TaskAssignment | null {
+    const available = this.discoverAgents(threadId).filter((p) => p.agentId !== excludeAgentId);
 
     if (available.length === 0) {
       return null;
@@ -756,10 +794,7 @@ export class PeerOrchestrationService {
   /**
    * Assign all lanes to available agents (fan-out).
    */
-  assignParallelLanes(
-    lanes: readonly TaskLane[],
-    threadId: string
-  ): readonly TaskAssignment[] {
+  assignParallelLanes(lanes: readonly TaskLane[], threadId: string): readonly TaskAssignment[] {
     const available = this.discoverAgents(threadId);
     return this.assignmentEngine.assignLanes(lanes, available, this.peerProtocol, threadId);
   }
@@ -783,10 +818,7 @@ export class PeerOrchestrationService {
   /**
    * Update synthesis card with result.
    */
-  completeSynthesisCard(
-    synthesisId: string,
-    result: SynthesisResult
-  ): void {
+  completeSynthesisCard(synthesisId: string, result: SynthesisResult): void {
     const card = this.synthesisCards.get(synthesisId);
     if (!card) return;
 

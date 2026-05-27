@@ -39,21 +39,18 @@ describe('parsePluginManifestSync', () => {
       homepage: 'https://example.com',
       license: 'MIT',
       capabilities: ['tool', 'connector', 'panel'],
-      skills: [
-        { id: 'skill-1', path: './skills/test', name: 'Test Skill' },
-      ],
-      connectors: [
-        { id: 'conn-1', type: 'oauth', name: 'OAuth Connector' },
-      ],
-      mcpServers: [
-        { id: 'mcp-1', name: 'MCP Server', command: 'npx', args: ['mcp-server'] },
-      ],
+      skills: [{ id: 'skill-1', path: './skills/test', name: 'Test Skill' }],
+      connectors: [{ id: 'conn-1', type: 'oauth', name: 'OAuth Connector' }],
+      mcpServers: [{ id: 'mcp-1', name: 'MCP Server', command: 'npx', args: ['mcp-server'] }],
       hooks: [
-        { id: 'hook-1', name: 'Test Hook', event: 'thread.created', action: { type: 'shell', command: 'echo test' } },
+        {
+          id: 'hook-1',
+          name: 'Test Hook',
+          event: 'thread.created',
+          action: { type: 'shell', command: 'echo test' },
+        },
       ],
-      panels: [
-        { id: 'panel-1', name: 'Test Panel', surface: 'thread', path: './panel.tsx' },
-      ],
+      panels: [{ id: 'panel-1', name: 'Test Panel', surface: 'thread', path: './panel.tsx' }],
       permissions: {
         filesystem: { read: ['/tmp'], write: ['/tmp'] },
         network: { allowed_hosts: ['api.example.com'] },
@@ -119,11 +116,7 @@ describe('parsePluginManifestSync', () => {
       name: 'Test',
       version: '1.0.0',
       capabilities: ['skill'],
-      skills: [
-        { name: 'Missing ID' },
-        null,
-        'not an object',
-      ],
+      skills: [{ name: 'Missing ID' }, null, 'not an object'],
     };
     const result = parsePluginManifestSync(JSON.stringify(manifest));
     expect(result.warnings).toContain('skills[0] must have id or path, ignoring.');
@@ -197,7 +190,7 @@ describe('parsePluginManifestSync', () => {
       ],
     };
     const result = parsePluginManifestSync(JSON.stringify(manifest));
-    expect(result.warnings.some(w => w.includes('hooks[0]'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('hooks[0]'))).toBe(true);
     expect(result.manifest!.hooks).toHaveLength(3);
   });
 
@@ -242,7 +235,7 @@ describe('parsePluginManifestSync', () => {
       },
     };
     const result = parsePluginManifestSync(JSON.stringify(manifest));
-    expect(result.warnings.some(w => w.includes('permissions.filesystem'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('permissions.filesystem'))).toBe(true);
     expect(result.manifest!.permissions.filesystem).toEqual({});
   });
 

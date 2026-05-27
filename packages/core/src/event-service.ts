@@ -9,6 +9,7 @@ import type { EventId, ThreadId, EventType, EventPayload, DoorwayEvent } from '@
 import { getNextSequence } from './database.js';
 import { generateId, toISOString } from './id-gen.js';
 import { ValidationError } from './errors.js';
+import { dbEventBus } from './event-bus.js';
 
 const knownEventTypes = new Set<string>([
   'thread.created',
@@ -25,6 +26,7 @@ const knownEventTypes = new Set<string>([
   'terminal.started',
   'terminal.input',
   'terminal.output',
+  'terminal.state',
   'terminal.stopped',
   'process.snapshot_captured',
   'process.snapshot_failed',
@@ -32,6 +34,8 @@ const knownEventTypes = new Set<string>([
   'terminal.file_delta_failed',
   'agent.attention',
   'completion.confidence_updated',
+  'clarification.requested',
+  'clarification.answered',
   'test.started',
   'test.finished',
   'diff.updated',
@@ -51,6 +55,11 @@ const knownEventTypes = new Set<string>([
   'merge.conflict',
   'browser.action',
   'browser.bundle_exported',
+  'unified_thread.session_created',
+  'unified_thread.agents_registered',
+  'unified_thread.agent_started',
+  'unified_thread.completed',
+  'unified_thread.synthesis_created',
 ]);
 
 /**
@@ -73,7 +82,7 @@ export function recordEvent(
   `
   ).run(eventId, threadId, type, JSON.stringify(payload), sequence, toISOString(timestamp));
 
-  return {
+  const event = {
     id: eventId,
     threadId,
     type,
@@ -81,6 +90,8 @@ export function recordEvent(
     timestamp,
     sequence,
   };
+  dbEventBus.emit(type, event);
+  return event;
 }
 
 /**

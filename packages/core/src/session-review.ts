@@ -1,6 +1,6 @@
 /**
  * Session Review Service (S2)
- * 
+ *
  * Tracks success/failure patterns across sessions:
  * - Records task outcomes (success, transient failure, permanent failure)
  * - Tracks retry counts per task type
@@ -33,30 +33,34 @@ export interface TaskOutcome {
   readonly timestamp?: Date;
 }
 
-export type SessionReviewEvent = {
-  readonly type: 'task_started';
-  readonly taskType: string;
-  readonly modelId?: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'task_completed';
-  readonly taskType: string;
-  readonly success: boolean;
-  readonly errorType?: 'transient' | 'permanent' | 'unknown';
-  readonly retryCount: number;
-  readonly duration: number;
-  readonly modelId?: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'task_rejected';
-  readonly taskType: string;
-  readonly reason: string;
-  readonly timestamp: Date;
-} | {
-  readonly type: 'session_completed';
-  readonly overallSuccess: boolean;
-  readonly timestamp: Date;
-};
+export type SessionReviewEvent =
+  | {
+      readonly type: 'task_started';
+      readonly taskType: string;
+      readonly modelId?: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'task_completed';
+      readonly taskType: string;
+      readonly success: boolean;
+      readonly errorType?: 'transient' | 'permanent' | 'unknown';
+      readonly retryCount: number;
+      readonly duration: number;
+      readonly modelId?: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'task_rejected';
+      readonly taskType: string;
+      readonly reason: string;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: 'session_completed';
+      readonly overallSuccess: boolean;
+      readonly timestamp: Date;
+    };
 
 export interface SessionMetrics {
   readonly totalSessions: number;
@@ -83,14 +87,16 @@ const TRANSIENT_ERROR_PATTERNS = [
   '503',
   '502',
   '504',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-  'ENOTFOUND',
+  'econnrefused',
+  'etimedout',
+  'enotfound',
 ];
 
 const PERMANENT_ERROR_PATTERNS = [
   'syntax error',
+  'syntaxerror',
   'type error',
+  'typeerror',
   'not found',
   'does not exist',
   'permission denied',
@@ -98,8 +104,8 @@ const PERMANENT_ERROR_PATTERNS = [
   'invalid',
   'cannot',
   'failed to',
-  'ENOENT',
-  'EACCES',
+  'enoent',
+  'eacces',
   'command not found',
   'undefined',
   'null',
@@ -112,7 +118,8 @@ const PERMANENT_ERROR_PATTERNS = [
 export class SessionReviewService {
   private sessionTasks: Map<string, TaskOutcome[]> = new Map();
   private sessionModelUsage: Map<string, Record<string, number>> = new Map();
-  private pendingTasks: Map<string, { taskType: string; startTime: Date; modelId?: string }> = new Map();
+  private pendingTasks: Map<string, { taskType: string; startTime: Date; modelId?: string }> =
+    new Map();
   private completedSessions: SessionReview[] = [];
 
   constructor(private readonly db?: Database.Database) {
@@ -152,7 +159,7 @@ export class SessionReviewService {
    * Get session review by ID
    */
   getSessionReview(sessionId: string): SessionReview | null {
-    return this.completedSessions.find(s => s.sessionId === sessionId) ?? null;
+    return this.completedSessions.find((s) => s.sessionId === sessionId) ?? null;
   }
 
   /**
@@ -222,8 +229,8 @@ export class SessionReviewService {
 
     return {
       totalSessions: this.completedSessions.length,
-      successfulSessions: this.completedSessions.filter(s => s.overallSuccess).length,
-      failedSessions: this.completedSessions.filter(s => !s.overallSuccess).length,
+      successfulSessions: this.completedSessions.filter((s) => s.overallSuccess).length,
+      failedSessions: this.completedSessions.filter((s) => !s.overallSuccess).length,
       averageTaskDuration: totalTasks > 0 ? totalDuration / totalTasks : 0,
       averageRetryCount: totalTasks > 0 ? totalRetries / totalTasks : 0,
       transientFailureRate: totalTasks > 0 ? transientFailures / totalTasks : 0,
@@ -271,23 +278,25 @@ export class SessionReviewService {
   /**
    * Get retry recommendations for a task type
    */
-  getRetryRecommendation(taskType: string): { shouldRetry: boolean; backoffMs: number; maxRetries: number } {
+  getRetryRecommendation(taskType: string): {
+    shouldRetry: boolean;
+    backoffMs: number;
+    maxRetries: number;
+  } {
     const taskOutcomes = this.getTaskOutcomes(taskType);
-    
+
     if (taskOutcomes.length === 0) {
       return { shouldRetry: true, backoffMs: 1000, maxRetries: 3 };
     }
 
-    const recentFailures = taskOutcomes
-      .filter(t => !t.success)
-      .slice(-5);
+    const recentFailures = taskOutcomes.filter((t) => !t.success).slice(-5);
 
     if (recentFailures.length === 0) {
       return { shouldRetry: true, backoffMs: 1000, maxRetries: 3 };
     }
 
     const lastFailure = recentFailures[recentFailures.length - 1];
-    
+
     if (lastFailure.errorType === 'permanent') {
       return { shouldRetry: false, backoffMs: 0, maxRetries: 0 };
     }
@@ -324,9 +333,11 @@ export class SessionReviewService {
     }
   }
 
-  private recordTaskCompleted(event: Extract<SessionReviewEvent, { type: 'task_completed' }>): void {
+  private recordTaskCompleted(
+    event: Extract<SessionReviewEvent, { type: 'task_completed' }>
+  ): void {
     const pending = this.pendingTasks.get(event.taskType);
-    const duration = pending 
+    const duration = pending
       ? event.timestamp.getTime() - pending.startTime.getTime()
       : event.duration;
 
@@ -336,6 +347,7 @@ export class SessionReviewService {
       errorType: event.errorType,
       retryCount: event.retryCount,
       duration: duration || event.duration,
+      timestamp: event.timestamp,
     };
 
     const sessionId = this.getCurrentSessionId() ?? generateId('session');
@@ -382,14 +394,14 @@ export class SessionReviewService {
   private generateSessionSuggestions(tasks: readonly TaskOutcome[]): string[] {
     const suggestions: string[] = [];
 
-    const failures = tasks.filter(t => !t.success);
+    const failures = tasks.filter((t) => !t.success);
     if (failures.length === 0) {
       return ['All tasks completed successfully.'];
     }
 
-    const transientCount = failures.filter(f => f.errorType === 'transient').length;
-    const permanentCount = failures.filter(f => f.errorType === 'permanent').length;
-    const unknownCount = failures.filter(f => f.errorType === 'unknown').length;
+    const transientCount = failures.filter((f) => f.errorType === 'transient').length;
+    const permanentCount = failures.filter((f) => f.errorType === 'permanent').length;
+    const unknownCount = failures.filter((f) => f.errorType === 'unknown').length;
 
     if (transientCount > 0) {
       suggestions.push(`${transientCount} transient failure(s) - retry with backoff recommended.`);
@@ -403,9 +415,11 @@ export class SessionReviewService {
       suggestions.push(`${unknownCount} unknown failure(s) - additional diagnostics needed.`);
     }
 
-    const highRetryTasks = tasks.filter(t => t.retryCount >= 2);
+    const highRetryTasks = tasks.filter((t) => t.retryCount >= 2);
     if (highRetryTasks.length > 0) {
-      suggestions.push(`Consider preemptive checks for: ${highRetryTasks.map(t => t.taskType).join(', ')}`);
+      suggestions.push(
+        `Consider preemptive checks for: ${highRetryTasks.map((t) => t.taskType).join(', ')}`
+      );
     }
 
     return suggestions;
@@ -435,7 +449,11 @@ export class SessionReviewService {
     return Array.from(patterns.values());
   }
 
-  private generateErrorSuggestion(pattern: { errorType: string; taskType: string; count: number }): string {
+  private generateErrorSuggestion(pattern: {
+    errorType: string;
+    taskType: string;
+    count: number;
+  }): string {
     if (pattern.errorType === 'transient') {
       return `Task "${pattern.taskType}" has ${pattern.count} transient failures. Consider adding retry logic or pre-flight checks.`;
     }
@@ -449,6 +467,13 @@ export class SessionReviewService {
     const outcomes: TaskOutcome[] = [];
     for (const session of this.completedSessions) {
       for (const task of session.tasks) {
+        if (task.taskType === taskType) {
+          outcomes.push(task);
+        }
+      }
+    }
+    for (const tasks of this.sessionTasks.values()) {
+      for (const task of tasks) {
         if (task.taskType === taskType) {
           outcomes.push(task);
         }

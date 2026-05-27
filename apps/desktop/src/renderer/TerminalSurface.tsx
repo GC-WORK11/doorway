@@ -1,8 +1,38 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { IDisposable, Terminal as XTermTerminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
+import type { TerminalBlock } from '@doorway/terminal-runtime';
 import type { TranscriptChunk } from '@doorway/protocol';
 import '@xterm/xterm/css/xterm.css';
+import { useTerminalStream } from './useTerminalStream';
+
+/**
+ * Render blocks as terminal text.
+ * Each block is rendered as: $ command\noutput\n
+ */
+export function terminalBlocksText(
+  blocks: readonly TerminalBlock[],
+  fallbackText: string
+): string {
+  if (blocks.length === 0) {
+    return fallbackText;
+  }
+
+  const lines: string[] = [];
+  for (const block of blocks) {
+    // Render command with prompt marker
+    if (block.command) {
+      lines.push(`$ ${block.command}`);
+    }
+    // Render output
+    if (block.output) {
+      lines.push(block.output);
+    }
+    // Add spacing between blocks
+    lines.push('');
+  }
+  return lines.join('\n');
+}
 
 export function terminalSurfaceText(
   chunks: readonly TranscriptChunk[],
@@ -16,9 +46,18 @@ export function terminalSurfaceText(
 }
 
 export function terminalSurfaceStatusLabel(
-  chunks: readonly TranscriptChunk[],
+  blocks: readonly TerminalBlock[] | readonly TranscriptChunk[],
   activeTerminalSessionId: string | null
 ): string {
+  // Check if it's blocks (has 'command' property) or chunks (has 'text' property)
+  const isBlocks =
+    blocks.length > 0 && 'command' in blocks[0];
+
+  if (isBlocks) {
+    return `${blocks.length} ${blocks.length === 1 ? 'block' : 'blocks'}`;
+  }
+
+  const chunks = blocks as readonly TranscriptChunk[];
   if (chunks.length > 0) {
     return `${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'} persisted`;
   }
@@ -86,12 +125,14 @@ function terminalSurfaceWritePlan(
 
 export function TerminalSurface({
   terminalTranscript,
+  terminalBlocks,
   fallbackText,
   activeTerminalSessionId,
   onInput,
   onResize,
 }: {
   readonly terminalTranscript: readonly TranscriptChunk[];
+  readonly terminalBlocks?: readonly TerminalBlock[];
   readonly fallbackText: string;
   readonly activeTerminalSessionId: string | null;
   readonly onInput?: (data: string) => unknown;
@@ -107,11 +148,19 @@ export function TerminalSurface({
     sessionId: null,
     renderedSequences: [],
   });
-  const terminalText = useMemo(
-    () => terminalSurfaceText(terminalTranscript, fallbackText),
-    [fallbackText, terminalTranscript]
+
+  // Prefer blocks over raw chunks for rendering
+  const terminalText = useMemo(() => {
+    if (terminalBlocks && terminalBlocks.length > 0) {
+      return terminalBlocksText(terminalBlocks, fallbackText);
+    }
+    return terminalSurfaceText(terminalTranscript, fallbackText);
+  }, [fallbackText, terminalTranscript, terminalBlocks]);
+
+  const statusLabel = terminalSurfaceStatusLabel(
+    terminalBlocks ?? [],
+    activeTerminalSessionId
   );
-  const statusLabel = terminalSurfaceStatusLabel(terminalTranscript, activeTerminalSessionId);
   const canWrite = Boolean(activeTerminalSessionId && onInput);
 
   useEffect(() => {
@@ -219,17 +268,31 @@ export function TerminalSurface({
     };
   }, []);
 
-  // Native 60fps Live Streaming via IPC
+  // Filter streamed duplicate/buffered catch-up messages using mountTimeRef
+  const mountTimeRef = useRef<number>(Date.now());
+
   useEffect(() => {
-    if (!activeTerminalSessionId) return;
-    const doorwayBridge = (window as unknown as { doorway?: LiveTerminalBridge }).doorway;
-    const unsubscribe = doorwayBridge?.onTerminalData?.((payload) => {
-      if (payload.sessionId === activeTerminalSessionId && terminalRef.current) {
-        terminalRef.current.write(payload.data);
-      }
-    });
-    return unsubscribe;
+    mountTimeRef.current = Date.now();
   }, [activeTerminalSessionId]);
+
+  useTerminalStream({
+    sessionId: activeTerminalSessionId ?? '',
+    enabled: Boolean(activeTerminalSessionId),
+    onData: (data, message) => {
+      if (terminalRef.current) {
+        const messageTime = new Date(message.timestamp).getTime();
+        if (messageTime >= mountTimeRef.current) {
+          terminalRef.current.write(data);
+        }
+      }
+    },
+    onResize: (cols, rows) => {
+      if (terminalRef.current && fitAddonRef.current) {
+        // Adapt UI layout dimension matching backend PTY resize
+        fitAddonRef.current.fit();
+      }
+    },
+  });
 
   useEffect(() => {
     const terminal = terminalRef.current;

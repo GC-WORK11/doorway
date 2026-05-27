@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { MergeAssessmentProjection, TaskId, ThreadId } from '@doorway/protocol';
+import type {
+  AgentRunId,
+  MergeAssessmentProjection,
+  TaskId,
+  TerminalSessionId,
+  ThreadId,
+} from '@doorway/protocol';
 import {
   createDatabase,
   createThread,
@@ -18,6 +24,7 @@ import {
   assertReviewMergeToolEnabled,
   browserEvidenceBundleJson,
   buildWorktreeMergeApproval,
+  clarificationRendererPayload,
   clipboardTextFromRequest,
   forkWorktreeBranchName,
   handoffGoalFromThreadRow,
@@ -237,6 +244,33 @@ describe('livePermissionDecisionOptions', () => {
         decision: 'denied',
       })
     ).toThrow('No agent run exists for this live permission request.');
+  });
+});
+
+describe('clarificationRendererPayload', () => {
+  it('maps detected terminal questions to the renderer clarification channel payload', () => {
+    expect(
+      clarificationRendererPayload({
+        id: 'clarification_1',
+        runId: 'run_question' as AgentRunId,
+        sessionId: 'term_question' as TerminalSessionId,
+        threadId: 'thread_question' as ThreadId,
+        question: 'Should I update tests too?',
+        context: 'Codex asked whether tests should be updated.',
+        suggestedResponses: ['yes', 'no'],
+      })
+    ).toEqual({
+      clarificationId: 'clarification_1',
+      runId: 'run_question',
+      sessionId: 'term_question',
+      threadId: 'thread_question',
+      question: 'Should I update tests too?',
+      context: 'Codex asked whether tests should be updated.',
+      suggestedResponses: ['yes', 'no'],
+      faultType: 'clarification_request',
+      reason: 'Terminal output requested user input.',
+      message: 'Should I update tests too?',
+    });
   });
 });
 

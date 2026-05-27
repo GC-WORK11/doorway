@@ -31,6 +31,8 @@ export interface LaunchSpec {
   args: readonly string[];
   cwd: string;
   env: Record<string, string>;
+  /** Prompt to send via stdin instead of as command-line argument. */
+  stdinPrompt?: string;
 }
 
 export interface ParseContext {

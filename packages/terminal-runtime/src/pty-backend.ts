@@ -28,8 +28,8 @@ interface PtySession {
   readonly startedAt: Date;
 }
 
-const DEFAULT_COLS = 80;
-const DEFAULT_ROWS = 24;
+const DEFAULT_COLS = 220;
+const DEFAULT_ROWS = 50;
 const DEFAULT_SHELL = process.platform === 'win32' ? 'powershell.exe' : 'bash';
 
 /**
@@ -53,7 +53,15 @@ export class PtyBackend implements TerminalBackend {
     const { cwd, cols = this.defaultCols, rows = this.defaultRows, env = {} } = options;
 
     const sessionId = this.generateSessionId();
-    const mergedEnv = { ...process.env, ...env };
+    const mergedEnv = {
+      ...process.env,
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      TERM_PROGRAM: 'doorway',
+      ...env,
+      COLUMNS: String(cols),
+      LINES: String(rows),
+    };
 
     let ptyProcess: pty.IPty;
 
@@ -140,11 +148,11 @@ class PtySessionHandle implements TerminalSessionHandle {
     });
 
     // Forward exit to listeners
-    session.pty.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
+    session.pty.onExit(({ exitCode, signal }: { exitCode: number; signal?: number | string }) => {
       this.sessions.delete(this.id);
       for (const listener of this.exitListeners) {
         try {
-          listener(exitCode ?? 0, signal !== undefined ? String(signal) : null);
+          listener(exitCode ?? 0, signal !== undefined ? normalizeExitSignal(signal) : null);
         } catch {
           // Listener threw, ignore
         }
@@ -204,6 +212,11 @@ function normalizeSignal(signal: string | number): string {
   if (signal === 9) return 'SIGKILL';
   if (signal === 15) return 'SIGTERM';
   return String(signal);
+}
+
+function normalizeExitSignal(signal: string | number): string | null {
+  if (signal === 0 || signal === '0') return null;
+  return normalizeSignal(signal);
 }
 
 /**

@@ -17,3 +17,5 @@ export { ClaudeCodeAdapter, type ClaudeCodeConfig } from './claude-code-adapter.
 export { CursorAdapter, type CursorConfig } from './cursor-adapter.js';
 export { GeminiAdapter, type GeminiConfig } from './gemini-adapter.js';
 export { CodexCliAdapter, type CodexCliConfig } from './codex-cli-adapter.js';
+export { AgyAdapter, type AgyConfig } from './agy-adapter.js';
+export * from './skill-loader.js';

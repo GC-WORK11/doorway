@@ -116,6 +116,10 @@ export function ComposerDock() {
             <option value="/plan">/plan</option>
             <option value="/handoff">/handoff</option>
             <option value="/test">/test</option>
+            <option value="/refactor">/refactor</option>
+            <option value="/security">/security</option>
+            <option value="/performance">/performance</option>
+            <option value="/pr-review">/pr-review</option>
           </select>
           <select
             value={provider}
@@ -174,7 +178,7 @@ export function ComposerDock() {
         </div>
       </div>
       <div className="composer-runtime-row">
-        <span className="composer-hint">Use @CloudCode or @Codex for routing context.</span>
+        <span className="composer-hint">Use @Claude or @Codex for routing context.</span>
         {selectedProviderModel && (
           <div className="composer-model-status" aria-label="Selected model">
             <span>{selectedProviderModel.providerId}</span>

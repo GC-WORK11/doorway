@@ -135,9 +135,7 @@ export interface ParseResult {
   readonly warnings: readonly string[];
 }
 
-export function parsePluginManifest(
-  manifestPath: string
-): ParseResult {
+export function parsePluginManifest(manifestPath: string): ParseResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -339,7 +337,11 @@ function validatePermissionsNetwork(
   }
   const obj = value as Record<string, unknown>;
   return {
-    allowed_hosts: validateOptionalStringArray(obj.allowed_hosts, warnings, 'permissions.network.allowed_hosts'),
+    allowed_hosts: validateOptionalStringArray(
+      obj.allowed_hosts,
+      warnings,
+      'permissions.network.allowed_hosts'
+    ),
   };
 }
 
@@ -354,7 +356,11 @@ function validatePermissionsProcess(
   }
   const obj = value as Record<string, unknown>;
   return {
-    allowed_commands: validateOptionalStringArray(obj.allowed_commands, warnings, 'permissions.process.allowed_commands'),
+    allowed_commands: validateOptionalStringArray(
+      obj.allowed_commands,
+      warnings,
+      'permissions.process.allowed_commands'
+    ),
   };
 }
 
@@ -376,10 +382,7 @@ function validateOptionalStringArray(
   return value as readonly string[];
 }
 
-function validateEntry(
-  value: unknown,
-  errors: string[]
-): EntryConfig | undefined {
+function validateEntry(value: unknown, errors: string[]): EntryConfig | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'object') {
     errors.push('Manifest entry must be an object.');
@@ -411,23 +414,21 @@ function validateOptionalRecord(
   return result;
 }
 
-function validateExtension(
-  value: unknown
-): ExtensionConfig | undefined {
+function validateExtension(value: unknown): ExtensionConfig | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'object') return undefined;
   const obj = value as Record<string, unknown>;
   return {
     schema_version: validateOptionalString(obj.schema_version),
     min_doorway_version: validateOptionalString(obj.min_doorway_version),
-    experimental: validateOptionalRecord(obj.experimental, 'extension.experimental') as Record<string, unknown>,
+    experimental: validateOptionalRecord(obj.experimental, 'extension.experimental') as Record<
+      string,
+      unknown
+    >,
   };
 }
 
-function validateSkillReferences(
-  value: unknown,
-  warnings: string[]
-): readonly SkillReference[] {
+function validateSkillReferences(value: unknown, warnings: string[]): readonly SkillReference[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     warnings.push('skills must be an array, ignoring.');
@@ -492,7 +493,10 @@ function validateConnectorReferences(
         type,
         name,
         description: validateOptionalString(obj.description),
-        config: validateOptionalRecord(obj.config, `connectors[${index}].config`) as Record<string, unknown>,
+        config: validateOptionalRecord(obj.config, `connectors[${index}].config`) as Record<
+          string,
+          unknown
+        >,
       };
     })
     .filter((item): boolean => item !== null) as unknown as readonly ConnectorReference[];
@@ -506,10 +510,7 @@ function validateConnectorType(value: unknown): ConnectorReference['type'] | nul
   return null;
 }
 
-function validateMcpServers(
-  value: unknown,
-  warnings: string[]
-): readonly McpServerConfig[] {
+function validateMcpServers(value: unknown, warnings: string[]): readonly McpServerConfig[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     warnings.push('mcpServers must be an array, ignoring.');
@@ -547,10 +548,7 @@ function validateMcpServers(
     .filter((item): boolean => item !== null) as unknown as readonly McpServerConfig[];
 }
 
-function validateHooks(
-  value: unknown,
-  warnings: string[]
-): readonly HookConfig[] {
+function validateHooks(value: unknown, warnings: string[]): readonly HookConfig[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     warnings.push('hooks must be an array, ignoring.');
@@ -584,7 +582,10 @@ function validateHooks(
         name: name ?? id,
         event,
         action,
-        config: validateOptionalRecord(obj.config, `hooks[${index}].config`) as Record<string, unknown>,
+        config: validateOptionalRecord(obj.config, `hooks[${index}].config`) as Record<
+          string,
+          unknown
+        >,
       };
     })
     .filter((item): boolean => item !== null) as unknown as readonly HookConfig[];
@@ -611,11 +612,7 @@ function validateHookEvent(value: unknown): HookEvent | null {
   return null;
 }
 
-function validateHookAction(
-  value: unknown,
-  index: number,
-  warnings: string[]
-): HookAction | null {
+function validateHookAction(value: unknown, index: number, warnings: string[]): HookAction | null {
   if (typeof value !== 'object' || value === null) {
     warnings.push(`hooks[${index}].action must be an object, ignoring.`);
     return null;
@@ -640,7 +637,10 @@ function validateHookAction(
       type: 'http',
       url,
       method: validateOptionalString(obj.method) ?? 'GET',
-      headers: validateOptionalRecord(obj.headers, `hooks[${index}].action.http.headers`) as Record<string, string>,
+      headers: validateOptionalRecord(obj.headers, `hooks[${index}].action.http.headers`) as Record<
+        string,
+        string
+      >,
       body: obj.body,
     };
   }
@@ -656,10 +656,7 @@ function validateHookAction(
   return null;
 }
 
-function validatePanels(
-  value: unknown,
-  warnings: string[]
-): readonly PanelConfig[] {
+function validatePanels(value: unknown, warnings: string[]): readonly PanelConfig[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     warnings.push('panels must be an array, ignoring.');
